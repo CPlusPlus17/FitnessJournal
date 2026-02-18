@@ -1,0 +1,116 @@
+[
+    {
+        "workoutName": "Strength A - Pull Focus (Hypertrophy)",
+        "description": "Counter-balance to pushing movements. Focus on lats and biceps to support running posture.",
+        "steps": [
+            {
+                "exercise": "DUMBBELL_ROW",
+                "weight": 17.5,
+                "reps": 10,
+                "sets": 4,
+                "rest": 90,
+                "note": "Unilateral (Single arm). Keep back flat."
+            },
+            {
+                "exercise": "PULL_UP",
+                "weight": null,
+                "reps": "AMRAP",
+                "sets": 3,
+                "rest": 120,
+                "note": "If cannot do full pull-ups, use bands or do Lat Pulldowns at 40kg."
+            },
+            {
+                "exercise": "BICEP_CURL",
+                "weight": 10,
+                "reps": 12,
+                "sets": 3,
+                "rest": 60,
+                "note": "Control the eccentric (lowering) phase."
+            },
+            {
+                "exercise": "FACE_PULL",
+                "weight": 15,
+                "reps": 15,
+                "sets": 3,
+                "rest": 60,
+                "note": "Use cable or bands. Critical for shoulder health."
+            }
+        ]
+    },
+    {
+        "workoutName": "Strength B - Leg Durability & Core",
+        "description": "Maintenance volume. Do not go to failure. Prepare legs for Sunday Long Run.",
+        "steps": [
+            {
+                "exercise": "GOBLET_SQUAT",
+                "weight": 20,
+                "reps": 10,
+                "sets": 3,
+                "rest": 90,
+                "note": "Deep range of motion. Use one heavy dumbbell."
+            },
+            {
+                "exercise": "LUNGES",
+                "weight": 10,
+                "reps": 10,
+                "sets": 3,
+                "rest": 60,
+                "note": "Weight is per hand. 10 reps per leg."
+            },
+            {
+                "exercise": "CALF_RAISE",
+                "weight": 15,
+                "reps": 20,
+                "sets": 4,
+                "rest": 45,
+                "note": "Essential for marathon runners. High reps."
+            },
+            {
+                "exercise": "PLANK",
+                "weight": null,
+                "reps": 60,
+                "sets": 3,
+                "rest": 60,
+                "note": "Hold for 60 seconds."
+            }
+        ]
+    },
+    {
+        "workoutName": "Strength C - Push Focus (Progressive)",
+        "description": "Progressing from Feb 18th session. Focus on Chest and Triceps.",
+        "steps": [
+            {
+                "exercise": "BENCH_PRESS",
+                "weight": 16,
+                "reps": 12,
+                "sets": 4,
+                "rest": 120,
+                "note": "Increased from 15kg. If 16kg unavailable, do 15kg for 14 reps."
+            },
+            {
+                "exercise": "SHOULDER_PRESS",
+                "weight": 12,
+                "reps": 8,
+                "sets": 4,
+                "rest": 90,
+                "note": "Heavier load, fewer reps than last time (was 10kg x 10)."
+            },
+            {
+                "exercise": "LATERAL_RAISE",
+                "weight": 6,
+                "reps": 15,
+                "sets": 3,
+                "rest": 60,
+                "note": "Focus on side delts for width."
+            },
+            {
+                "exercise": "TRICEPS_EXTENSION",
+                "weight": 6,
+                "reps": 12,
+                "sets": 3,
+                "rest": 60,
+                "note": "Overhead extension. Slight increase from 5kg."
+            }
+        ]
+    }
+]
