@@ -213,12 +213,48 @@ def main():
         except Exception as e:
             sys.stderr.write(f"Error fetching scheduled workouts: {e}\n")
 
+        # Get Recovery info (Sleep & Body Battery)
+        recovery_metrics = {
+            "sleep_score": None,
+            "current_body_battery": None
+        }
+        try:
+            today_str = date.today().isoformat()
+            
+            # Sleep Score
+            try:
+                slp = garmin.get_sleep_data(today_str)
+                score = slp.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value")
+                if score is not None:
+                    try:
+                        recovery_metrics["sleep_score"] = int(score)
+                    except ValueError:
+                        pass
+            except Exception as e:
+                sys.stderr.write(f"Error fetching sleep: {e}\n")
+                
+            # Body Battery
+            try:
+                bb = garmin.get_body_battery(today_str)
+                if isinstance(bb, list) and len(bb) > 0:
+                    bb_vals = bb[0].get("bodyBatteryValuesArray", [])
+                    if isinstance(bb_vals, list) and len(bb_vals) > 0:
+                        last_val = bb_vals[-1]
+                        if len(last_val) >= 2:
+                            recovery_metrics["current_body_battery"] = int(last_val[1])
+            except Exception as e:
+                sys.stderr.write(f"Error fetching body battery: {e}\n")
+                
+        except Exception as e:
+            sys.stderr.write(f"Error in recovery section: {e}\n")
+
         output = {
             "activities": final_activities,
             "plans": active_plans,
             "user_profile": user_profile,
             "max_metrics": max_metrics,
-            "scheduled_workouts": scheduled_workouts
+            "scheduled_workouts": scheduled_workouts,
+            "recovery_metrics": recovery_metrics
         }
 
         print(json.dumps(output))

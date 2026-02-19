@@ -62,6 +62,14 @@ pub struct GarminResponse {
     pub max_metrics: Option<GarminMaxMetrics>,
     #[serde(default)]
     pub scheduled_workouts: Vec<ScheduledWorkout>,
+    #[serde(default)]
+    pub recovery_metrics: Option<GarminRecoveryMetrics>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GarminRecoveryMetrics {
+    pub sleep_score: Option<i32>,
+    pub current_body_battery: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

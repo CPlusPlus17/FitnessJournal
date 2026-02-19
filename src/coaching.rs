@@ -137,15 +137,45 @@ impl Coach {
         profile: &Option<crate::models::GarminProfile>,
         metrics: &Option<crate::models::GarminMaxMetrics>,
         scheduled_workouts: &[crate::models::ScheduledWorkout],
+        recovery_metrics: &Option<crate::models::GarminRecoveryMetrics>,
         context: &CoachContext
     ) -> String {
         let now = Utc::now();
         let mut brief = String::new();
 
-        // 1. Header (System Role Definition)
+        // 1. Header & Current Context
         brief.push_str("# Certified Coaching Brief\n\n");
         brief.push_str("**Role**: You are an elite Multi-Sport Coach (Triathlon/Strength/Endurance). Your job is to analyze the athlete's data and produce a highly specific, periodized training plan.\n\n");
         
+        let today_date_str = now.format("%Y-%m-%d").to_string();
+        brief.push_str(&format!("**Current Date**: {}\n\n", today_date_str));
+
+        // Let's summarize what was already done today from the history
+        brief.push_str("**Activities Completed Today**:\n");
+        let todays_activities: Vec<&crate::models::ActivitySummary> = history.iter()
+            .filter(|a| a.time.format("%Y-%m-%d").to_string() == today_date_str)
+            .collect();
+        
+        if todays_activities.is_empty() {
+            brief.push_str("- None.\n\n");
+        } else {
+            for a in todays_activities {
+                brief.push_str(&format!("- **{}**: {:.1} min, {:.1} km\n", a.name, a.duration_minutes, a.distance_km));
+            }
+            brief.push_str("\n");
+        }
+
+        if let Some(rec) = recovery_metrics {
+            brief.push_str("**Today's Recovery & Readiness**:\n");
+            if let Some(bb) = rec.current_body_battery {
+                brief.push_str(&format!("- **Body Battery**: {} / 100\n", bb));
+            }
+            if let Some(ss) = rec.sleep_score {
+                brief.push_str(&format!("- **Sleep Score**: {} / 100\n", ss));
+            }
+            brief.push_str("\n");
+        }
+
         // 2. Athlete Profile
         brief.push_str("## 1. Athlete Profile\n");
         if let Some(p) = profile {
