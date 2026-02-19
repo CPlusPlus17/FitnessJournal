@@ -31,6 +31,7 @@ def load_exercise_db(csv_path="Garmin Exercises Database - Exercises.csv"):
 
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
+            next(f)  # Skip the first row containing group headers (NAME,,,DETAILED_INFO...)
             reader = csv.DictReader(f)
             for row in reader:
                 # Keys: Name, CATEGORY_GARMIN, NAME_GARMIN
@@ -74,6 +75,8 @@ MANUAL_OVERRIDES = {
     "SQUAT": ("SQUAT", "SQUAT"),
     "DEADLIFT": ("DEADLIFT", "DEADLIFT"),
     "BENCH_PRESS": ("BENCH_PRESS", "BENCH_PRESS"),
+    "YOGA": ("WARM_UP", "STRETCH_SIDE"),
+    "STRETCHING": ("WARM_UP", "STRETCH_SIDE"),
     "OVERHEAD_PRESS": ("SHOULDER_PRESS", "SHOULDER_PRESS"),
     "SHOULDER_PRESS": ("SHOULDER_PRESS", "SHOULDER_PRESS"),
     "PLANK": ("PLANK", "PLANK"),
@@ -139,7 +142,11 @@ def parse_duration(val):
     if isinstance(val, str):
         import re
         nums = re.findall(r'\d+', val)
-        if nums: return int(nums[0])
+        if nums:
+            parsed = int(nums[0])
+            if "min" in val.lower():
+                return parsed * 60
+            return parsed
     return None
 
 def parse_weight(val):
@@ -198,6 +205,7 @@ def build_workout_payload(data, robust=False):
         weight_val = parse_weight(step.get("weight"))
         weight_unit = None
         if weight_val is not None:
+            weight_val = weight_val * 1000.0  # Convert kg to grams for Garmin base unit
             weight_unit = UNIT_KILOGRAM
 
         # Robust Mode

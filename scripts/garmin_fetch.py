@@ -216,22 +216,35 @@ def main():
         # Get Recovery info (Sleep & Body Battery)
         recovery_metrics = {
             "sleep_score": None,
+            "recent_sleep_scores": [],
             "current_body_battery": None
         }
         try:
             today_str = date.today().isoformat()
             
-            # Sleep Score
+            # 7-Day Sleep Trend
+            from datetime import timedelta
             try:
-                slp = garmin.get_sleep_data(today_str)
-                score = slp.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value")
-                if score is not None:
+                for i in range(7):
+                    day_str = (date.today() - timedelta(days=i)).isoformat()
                     try:
-                        recovery_metrics["sleep_score"] = int(score)
-                    except ValueError:
-                        pass
+                        slp = garmin.get_sleep_data(day_str)
+                        score = slp.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value")
+                        if score is not None:
+                            try:
+                                score_int = int(score)
+                                recovery_metrics["recent_sleep_scores"].append({
+                                    "date": day_str,
+                                    "score": score_int
+                                })
+                                if i == 0:
+                                    recovery_metrics["sleep_score"] = score_int
+                            except ValueError:
+                                pass
+                    except Exception as loop_e:
+                        sys.stderr.write(f"Error fetching sleep for {day_str}: {loop_e}\n")
             except Exception as e:
-                sys.stderr.write(f"Error fetching sleep: {e}\n")
+                sys.stderr.write(f"Error in sleep trend logic: {e}\n")
                 
             # Body Battery
             try:

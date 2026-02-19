@@ -69,7 +69,15 @@ pub struct GarminResponse {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GarminRecoveryMetrics {
     pub sleep_score: Option<i32>,
+    #[serde(default)]
+    pub recent_sleep_scores: Vec<SleepScore>,
     pub current_body_battery: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SleepScore {
+    pub date: String,
+    pub score: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -158,4 +166,11 @@ pub struct GarminSet {
 pub struct GarminExercise {
     pub category: String,
     pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ExerciseMuscleMap {
+    pub name: String,
+    pub muscles: Vec<String>,
+    pub frequency: i32,
 }

@@ -100,15 +100,18 @@ impl GrafanaClient {
                     let activity = crate::models::ActivitySummary {
                         time,
                         name: as_string(&row[7]), 
-                        distance_km: as_f64(&row[1]) / 1000.0, // Assuming meters
-                        duration_minutes: as_f64(&row[2]) / 60.0, // Assuming seconds
+                        distance_km: as_f64(&row[1]) / 1000.0,
+                        duration_minutes: as_f64(&row[2]) / 60.0,
                         calories: as_f64(&row[3]),
                         avg_hr: as_f64(&row[4]),
                         max_hr: as_f64(&row[5]),
                         sport: as_string(&row[6]),
-                        sub_sport: "".to_string(), // Not available in schema
+                        sub_sport: "".to_string(),
                     };
-                    activities.push(activity);
+
+                    if activity.duration_minutes > 0.1 && activity.name != "END" {
+                        activities.push(activity);
+                    }
                  }
             }
         }

@@ -1,1 +1,8 @@
 /target
+secrets/*
+output_*
+test_*
+garmin_cache.json
+generated_workouts.json
+fitness_journal.db
+*.pyc

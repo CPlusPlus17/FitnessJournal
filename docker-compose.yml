@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    container_name: fitness-coach-signal-api
+    environment:
+      - MODE=json-rpc
+      #- SIGNAL_CLI_UID=1000 # Optional: Match your user ID
+      #- SIGNAL_CLI_GID=1000 # Optional: Match your group ID
+    volumes:
+      - ./secrets/signal-data:/home/.local/share/signal-cli
+    ports:
+      - '8080:8080'
+    restart: unless-stopped

@@ -138,7 +138,8 @@ impl Coach {
         metrics: &Option<crate::models::GarminMaxMetrics>,
         scheduled_workouts: &[crate::models::ScheduledWorkout],
         recovery_metrics: &Option<crate::models::GarminRecoveryMetrics>,
-        context: &CoachContext
+        context: &CoachContext,
+        progression_history: &[String]
     ) -> String {
         let now = Utc::now();
         let mut brief = String::new();
@@ -173,6 +174,14 @@ impl Coach {
             if let Some(ss) = rec.sleep_score {
                 brief.push_str(&format!("- **Sleep Score**: {} / 100\n", ss));
             }
+            
+            if !rec.recent_sleep_scores.is_empty() {
+                brief.push_str("- **7-Day Sleep Trend**: ");
+                let trend_strs: Vec<String> = rec.recent_sleep_scores.iter().map(|s| format!("{} ({})", s.score, s.date.chars().skip(5).collect::<String>())).collect();
+                brief.push_str(&trend_strs.join(", "));
+                brief.push_str("\n");
+            }
+            
             brief.push_str("\n");
         }
 
@@ -264,105 +273,127 @@ impl Coach {
         let two_weeks_ago = now - Duration::days(14);
         let two_weeks_ago_str = two_weeks_ago.format("%Y-%m-%dT%H:%M:%S").to_string();
 
+        let mut weekly_muscle_volume: std::collections::HashMap<&str, i32> = std::collections::HashMap::new();
+
         // Sort detailed activities by date desc
         let mut sorted_activities = detailed_activities.to_vec();
-        sorted_activities.sort_by(|a, b| b.start_time.cmp(&a.start_time));
-
-        let mut exercise_bests: std::collections::HashMap<String, (f64, i32, String)> = std::collections::HashMap::new();
-
-        for activity in &sorted_activities {
-            if activity.start_time < two_weeks_ago_str {
-                continue;
-            }
-            
-            // Format Date
-            let date_part = activity.start_time.split('T').next().unwrap_or(&activity.start_time);
-            
-            // Basic Info
-            let dist = activity.distance.unwrap_or(0.0) / 1000.0;
-            let dur = activity.duration.unwrap_or(0.0) / 60.0;
-            
-            brief.push_str(&format!("- **{} {}**: {:.1} min", 
-                date_part, activity.name, dur));
-            
-            if dist > 0.1 {
-                brief.push_str(&format!(", {:.1} km", dist));
-            }
-            
-            // Strength Details & Stats Collection
-            if let Some(crate::models::GarminSetsData::Details(data)) = &activity.sets {
-                let mut vol = 0.0;
-                // We'll collect exercise string for the log line
-                let mut exercises_summary: Vec<String> = Vec::new();
-
-                for set in &data.exercise_sets {
-                    if set.set_type == "ACTIVE" {
-                        let w = set.weight.unwrap_or(0.0) / 1000.0; // g -> kg
-                        let r = set.repetition_count.unwrap_or(0);
-                        vol += w * r as f64;
-
-                        // Track Bests
-                        if let Some(ex) = set.exercises.first() {
-                            let ex_name = &ex.category; // e.g. "BENCH_PRESS"
-                            // If weight > 0, track it
-                            if w > 0.0 {
-                                let entry = exercise_bests.entry(ex_name.clone()).or_insert((0.0, 0, String::new()));
-                                if w > entry.0 {
-                                    *entry = (w, r, date_part.to_string());
-                                }
-                            }
-                            if !exercises_summary.contains(ex_name) {
-                                exercises_summary.push(ex_name.clone());
-                            }
-                        }
+        
+        // Take up to 20 most recent activities from the detailed array
+        let mut count = 0;
+        for act in detailed_activities {
+            let act_time = chrono::DateTime::parse_from_rfc3339(&act.start_time)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| {
+                    chrono::NaiveDateTime::parse_from_str(&act.start_time, "%Y-%m-%d %H:%M:%S")
+                        .map(|ndt| chrono::DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
+                        .unwrap_or_default()
+                });
+            if act_time > two_weeks_ago {
+                let mut focus_str = String::new();
+                if let Some(crate::models::GarminSetsData::Details(data)) = &act.sets {
+                    // Extract unique exercise categories
+                    let mut unique_exercises = std::collections::HashSet::new();
+                    
+                    let is_last_7_days = act_time > (now - Duration::days(7));
+                    
+                    for set in &data.exercise_sets {
+                       if let Some(ex) = set.exercises.first() {
+                           unique_exercises.insert(ex.category.clone());
+                           
+                           // Accumulate muscle group volume for the last 7 days
+                           // We only count ACTIVE working sets
+                           if is_last_7_days && set.set_type == "ACTIVE" {
+                               if ex.category == "WARM_UP" {
+                                   continue;
+                               }
+                               let mg = match ex.category.as_str() {
+                                   "BENCH_PRESS" | "PUSH_UP" => "Chest",
+                                   "ROW" | "PULL_UP" | "PULL_DOWN" => "Back",
+                                   "SQUAT" | "DEADLIFT" | "LUNGE" | "CALF_RAISE" => "Legs",
+                                   "SHOULDER_PRESS" | "FRONT_RAISE" | "LATERAL_RAISE" => "Shoulders",
+                                   "TRICEPS_EXTENSION" | "BICEP_CURL" => "Arms",
+                                   "CORE" | "PLANK" | "SIT_UP" => "Core",
+                                   _ => "Other",
+                               };
+                               *weekly_muscle_volume.entry(mg).or_insert(0) += 1;
+                           }
+                       }
+                    }
+                    if !unique_exercises.is_empty() {
+                        let sorted: Vec<_> = unique_exercises.into_iter().collect();
+                        focus_str = format!(". Focus: {}", sorted.join(", "));
                     }
                 }
                 
-                if vol > 0.0 {
-                    brief.push_str(&format!(", Vol: {:.0} kg", vol));
-                }
-                if !exercises_summary.is_empty() {
-                     brief.push_str(&format!(". Focus: {}", exercises_summary.join(", ")));
-                }
+                let vol_str = if focus_str.is_empty() { "".to_string() } else {
+                    let mut vol = 0.0;
+                    if let Some(crate::models::GarminSetsData::Details(data)) = &act.sets {
+                        vol = data.exercise_sets.iter()
+                            .filter(|s| s.set_type == "ACTIVE")
+                            .map(|s| s.weight.unwrap_or(0.0) / 1000.0 * (s.repetition_count.unwrap_or(0) as f64))
+                            .sum();
+                    }
+                    format!(", Vol: {:.0} kg", vol)
+                };
+
+                brief.push_str(&format!("- **{} {}**: {:.1} min, {:.1} km{}{} , Avg HR: {:.0}\n", 
+                    act.start_time.split('T').next().unwrap_or(""),
+                    act.name,
+                    act.duration.unwrap_or(0.0) / 60.0,
+                    act.distance.unwrap_or(0.0) / 1000.0,
+                    vol_str,
+                    focus_str,
+                    act.average_hr.unwrap_or(0.0)
+                ));
+                count += 1;
+                if count >= 20 { break; }
             }
-            
-            // HR Stats
-            if let Some(hr) = activity.average_hr {
-                brief.push_str(&format!(", Avg HR: {:.0}", hr));
+        }
+        brief.push_str("\n");
+
+        if !progression_history.is_empty() {
+             brief.push_str("## 4. Current Progression Track (All-Time Bests / Recent Working Weights)\n");
+             brief.push_str("*Max weight recorded used as baseline for progressive overload.*\n");
+             for entry in progression_history {
+                 brief.push_str(&format!("{}\n", entry));
+             }
+         }
+         // 5. Muscle Fatigue Heatmap
+        if !weekly_muscle_volume.is_empty() {
+            brief.push_str("## 5. Muscle Fatigue Heatmap (Last 7 Days)\n");
+            brief.push_str("*Number of Active Working Sets performed per muscle group. Aim for 10-20 sets per week for optimal hypertrophy.* \n");
+            let mut sorted_volumes: Vec<_> = weekly_muscle_volume.iter().collect();
+            sorted_volumes.sort_by(|a, b| b.1.cmp(a.1)); // Sort descending by volume
+            for (mg, vol) in sorted_volumes {
+                brief.push_str(&format!("- **{}**: {} sets\n", mg, vol));
             }
             brief.push_str("\n");
         }
 
-        // 5. Strength Bests Section
-        brief.push_str("\n## 4. Recent Strength Bests (Last 14d)\n");
-        brief.push_str("*Max weight recorded used as baseline for progressive overload.*\n");
-        let mut sorted_bests: Vec<_> = exercise_bests.into_iter().collect();
-        sorted_bests.sort_by(|a, b| a.0.cmp(&b.0)); // Sort by Exercise Name
-
-        for (name, (weight, reps, date)) in sorted_bests {
-            brief.push_str(&format!("- **{}**: {:.1}kg x {} ({})\n", name, weight, reps, date));
-        }
-
-        // 6. Analysis Request (Prompt)
-        brief.push_str("\n## 5. Required Output\n");
+        // 6. Required Output
+        brief.push_str("## 6. Required Output\n");
         brief.push_str("Based on the Athlete Profile, Goals, and Activity Log, please generate the training plan for the **Next 7 Days**.\n");
         brief.push_str("You **MUST** output the Strength Workouts in the following JSON format (inside a json code block). \n");
-        brief.push_str("**CRITICAL**: Start every workout with a Dynamic Warmup and end with Static Stretching.\n");
-        brief.push_str("```json\n");
+        brief.push_str("**CRITICAL RULES**:\n");
+        brief.push_str("1. Start every workout with a Dynamic Warmup and end with Static Stretching.\n");
+        brief.push_str("2. **EXERCISE VOCABULARY**: You MUST exclusively use these exact string names for exercises, otherwise the upload script will fail: `BENCH_PRESS`, `SQUAT`, `DEADLIFT`, `SHOULDER_PRESS`, `LUNGE`, `CALF_RAISE`, `ROW`, `PULL_UP`, `PUSH_UP`, `CORE`, `PLANK`, `SIT_UP`, `TRICEPS_EXTENSION`, `BICEP_CURL`, `TOTAL_BODY`, `PLYO`, `WARM_UP`, `YOGA`.\n");
+        brief.push_str("3. **REST PERIODS**: For the `rest` field, output an integer in seconds (e.g., `rest: 90`), or the exact string `\"LAP\"` if the rest should remain untimed until the user manually presses the lap button.\n");
+        
+        brief.push_str("\n```json\n");
         brief.push_str("[\n");
         brief.push_str("  {\n");
         brief.push_str("    \"workoutName\": \"Strength A - Push Focus\",\n");
         brief.push_str("    \"description\": \"Focus on chest and triceps hypertrophy.\",\n");
         brief.push_str("    \"steps\": [\n");
         brief.push_str("      { \"phase\": \"warmup\", \"exercise\": \"ROW\", \"duration\": \"5min\", \"note\": \"Light rowing or cardio.\" },\n");
-        brief.push_str("      { \"phase\": \"interval\", \"exercise\": \"BENCH_PRESS\", \"weight\": 82.5, \"reps\": 5, \"sets\": 5, \"rest\": 180, \"note\": \"Keep RPE 8.\" },\n");
-        brief.push_str("      { \"phase\": \"interval\", \"exercise\": \"SHOULDER_PRESS\", \"weight\": 40, \"reps\": 8, \"sets\": 3, \"rest\": 90 },\n");
+        brief.push_str("      { \"phase\": \"interval\", \"exercise\": \"BENCH_PRESS\", \"weight\": 12.5, \"reps\": 10, \"sets\": 4, \"rest\": 120, \"note\": \"Progressive overload from last week.\" },\n");
+        brief.push_str("      { \"phase\": \"interval\", \"exercise\": \"SHOULDER_PRESS\", \"weight\": 10.0, \"reps\": \"AMRAP\", \"sets\": 3, \"rest\": \"LAP\", \"note\": \"Push to near failure.\" },\n");
         brief.push_str("      { \"phase\": \"cooldown\", \"exercise\": \"YOGA\", \"duration\": \"10min\", \"note\": \"Static stretching for chest and tris.\" }\n");
         brief.push_str("    ]\n");
         brief.push_str("  }\n");
         brief.push_str("]\n");
         brief.push_str("```\n");
-        brief.push_str("Use `phase`: 'warmup', 'interval', or 'cooldown'. For 'weight', ensure you propose a specific load (in kg). For 'reps', you can use integers or 'AMRAP'.\n");
+        brief.push_str("Use `phase`: 'warmup', 'interval', or 'cooldown'. For 'weight', ensure you propose a specific load (in kg) available in the equipment list. For 'reps', use integers or 'AMRAP'.\n");
         
         brief
     }
