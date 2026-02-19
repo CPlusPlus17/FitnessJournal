@@ -41,14 +41,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Fetch Detailed Data from Garmin Connect (Python Bridge)
     println!("\nFetching detailed stats from Garmin Connect...");
-    let (detailed_activities, active_plans, user_profile, max_metrics) = match garmin_client.fetch_data() {
+    let (detailed_activities, active_plans, user_profile, max_metrics, scheduled_workouts) = match garmin_client.fetch_data() {
         Ok(response) => {
-            println!("Found {} detailed activities and {} active plans.", response.activities.len(), response.plans.len());
-            (response.activities, response.plans, response.user_profile, response.max_metrics)
+            println!("Found {} detailed activities, {} active plans, and {} scheduled workouts.", 
+                response.activities.len(), response.plans.len(), response.scheduled_workouts.len());
+            (response.activities, response.plans, response.user_profile, response.max_metrics, response.scheduled_workouts)
         },
         Err(e) => {
             eprintln!("Failed to fetch detailed Garmin data: {}", e);
-            (Vec::new(), Vec::new(), None, None)
+            (Vec::new(), Vec::new(), None, None, Vec::new())
         }
     };
 
@@ -84,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &active_plans,
         &user_profile,
         &max_metrics,
+        &scheduled_workouts,
         &context
     );
 

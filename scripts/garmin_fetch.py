@@ -157,11 +157,68 @@ def main():
         except Exception as e:
              sys.stderr.write(f"Error fetching max metrics: {e}\n")
 
+        # Get Scheduled Workouts (Today and Future)
+        scheduled_workouts = []
+        try:
+            today_str = date.today().isoformat()
+            y, m, d = today_str.split('-')
+            # Fetch current month's calendar
+            cal_endpoint = f"/calendar-service/year/{y}/month/{int(m)-1}"
+            cal_data = garmin.connectapi(cal_endpoint)
+            
+            # Cache fetched plan details to avoid redundant API calls
+            plan_cache = {}
+
+            if "calendarItems" in cal_data:
+                for item in cal_data["calendarItems"]:
+                    item_date = item.get("date")
+                    item_type = item.get("itemType")
+                    if item_date and item_date >= today_str and item_type != "activity":
+                        workout_info = {
+                            "title": item.get("title", "Unknown"),
+                            "date": item_date,
+                            "sport": item.get("sportTypeKey", "unknown"),
+                            "type": item_type,
+                            "duration": None,
+                            "distance": None,
+                            "description": None
+                        }
+                        
+                        # Fetch extra details if it's an adaptive plan
+                        plan_id = item.get("trainingPlanId")
+                        uuid = item.get("workoutUuid")
+                        
+                        if plan_id and uuid:
+                            if plan_id not in plan_cache:
+                                try:
+                                    plan_cache[plan_id] = garmin.get_adaptive_training_plan_by_id(plan_id)
+                                except Exception as e:
+                                    sys.stderr.write(f"Error fetching plan {plan_id}: {e}\n")
+                                    plan_cache[plan_id] = {}
+                                    
+                            plan_details = plan_cache.get(plan_id, {})
+                            if "taskList" in plan_details:
+                                for task in plan_details["taskList"]:
+                                    tw = task.get("taskWorkout", {})
+                                    if isinstance(tw, dict) and tw.get("workoutUuid") == uuid:
+                                        if "estimatedDurationInSecs" in tw:
+                                            workout_info["duration"] = tw["estimatedDurationInSecs"] / 60.0
+                                        if "estimatedDistanceInMeters" in tw:
+                                            workout_info["distance"] = tw["estimatedDistanceInMeters"] / 1000.0
+                                        if "workoutDescription" in tw:
+                                            workout_info["description"] = tw["workoutDescription"]
+                                        break
+                                        
+                        scheduled_workouts.append(workout_info)
+        except Exception as e:
+            sys.stderr.write(f"Error fetching scheduled workouts: {e}\n")
+
         output = {
             "activities": final_activities,
             "plans": active_plans,
             "user_profile": user_profile,
-            "max_metrics": max_metrics
+            "max_metrics": max_metrics,
+            "scheduled_workouts": scheduled_workouts
         }
 
         print(json.dumps(output))

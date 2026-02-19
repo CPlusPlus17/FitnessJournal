@@ -136,6 +136,7 @@ impl Coach {
         plans: &[crate::models::GarminPlan],
         profile: &Option<crate::models::GarminProfile>,
         metrics: &Option<crate::models::GarminMaxMetrics>,
+        scheduled_workouts: &[crate::models::ScheduledWorkout],
         context: &CoachContext
     ) -> String {
         let now = Utc::now();
@@ -178,6 +179,21 @@ impl Coach {
             for p in plans {
                 brief.push_str(&format!("- **{}** (Type: {}, Ends: {})\n", p.name, p.plan_type, p.end_date));
             }
+        }
+
+        brief.push_str("\n**Scheduled Garmin Workouts**:\n");
+        if scheduled_workouts.is_empty() {
+            brief.push_str("- None scheduled.\n");
+        } else {
+            for sw in scheduled_workouts {
+                let mut details = format!("- **{}** (Date: {}, Sport: {}", sw.title, sw.date, sw.sport);
+                if let Some(d) = sw.duration { details.push_str(&format!(", Duration: {:.0}min", d)); }
+                if let Some(dist) = sw.distance { details.push_str(&format!(", Distance: {:.1}km", dist)); }
+                if let Some(desc) = &sw.description { details.push_str(&format!(", Focus: '{}'", desc)); }
+                details.push_str(")\n");
+                brief.push_str(&details);
+            }
+            brief.push_str("\n*Note for Coach*: Please consider the scheduled Garmin workouts above. Advise if today's scheduled workout should be performed, and adjust the strength volume if necessary.\n");
         }
         brief.push_str("\n**Constraints**:\n");
         for c in &context.constraints {

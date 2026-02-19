@@ -60,6 +60,20 @@ pub struct GarminResponse {
     pub user_profile: Option<GarminProfile>,
     #[serde(default)]
     pub max_metrics: Option<GarminMaxMetrics>,
+    #[serde(default)]
+    pub scheduled_workouts: Vec<ScheduledWorkout>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ScheduledWorkout {
+    pub title: String,
+    pub date: String,
+    pub sport: String,
+    #[serde(rename = "type")]
+    pub item_type: String,
+    pub duration: Option<f64>,
+    pub distance: Option<f64>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
