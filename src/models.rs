@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum WorkoutType {
@@ -19,19 +19,6 @@ pub struct Workout {
     pub distance_km: Option<f64>,
     pub avg_heart_rate: Option<f64>,
     pub calories: Option<f64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ActivitySummary {
-    pub time: DateTime<Utc>,
-    pub name: String,
-    pub duration_minutes: f64,
-    pub distance_km: f64,
-    pub calories: f64,
-    pub avg_hr: f64,
-    pub max_hr: f64,
-    pub sport: String, // e.g., "Generic" (often mapped to specific sports in Garmin)
-    pub sub_sport: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +59,12 @@ pub struct GarminRecoveryMetrics {
     #[serde(default)]
     pub recent_sleep_scores: Vec<SleepScore>,
     pub current_body_battery: Option<i32>,
+    pub training_readiness: Option<i32>,
+    pub hrv_status: Option<String>,
+    pub hrv_weekly_avg: Option<i32>,
+    pub hrv_last_night_avg: Option<i32>,
+    #[serde(default)]
+    pub rhr_trend: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -82,11 +75,16 @@ pub struct SleepScore {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScheduledWorkout {
-    pub title: String,
+    pub title: Option<String>,
     pub date: String,
-    pub sport: String,
-    #[serde(rename = "type")]
-    pub item_type: String,
+    #[serde(default, alias = "sportTypeKey")]
+    pub sport: Option<String>,
+    #[serde(default, alias = "itemType", rename = "type")]
+    pub item_type: Option<String>,
+    #[serde(default, alias = "isRace")]
+    pub is_race: Option<bool>,
+    #[serde(default, alias = "primaryEvent")]
+    pub primary_event: Option<bool>,
     pub duration: Option<f64>,
     pub distance: Option<f64>,
     pub description: Option<String>,
@@ -122,10 +120,12 @@ pub struct GarminPlan {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GarminActivity {
-    pub id: i64,
-    pub name: String,
+    #[serde(alias = "activityId")]
+    pub id: Option<i64>,
+    #[serde(alias = "activityName")]
+    pub name: Option<String>,
     #[serde(rename = "type")]
-    pub activity_type: String,
+    pub activity_type: Option<String>,
     #[serde(rename = "startTimeLocal")]
     pub start_time: String,
     pub distance: Option<f64>,
@@ -134,14 +134,14 @@ pub struct GarminActivity {
     pub average_hr: Option<f64>,
     #[serde(rename = "maxHR")]
     pub max_hr: Option<f64>,
-    pub sets: Option<GarminSetsData>, 
+    pub sets: Option<GarminSetsData>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum GarminSetsData {
     Details(GarminSetContainer),
-    Empty(Vec<serde_json::Value>), 
+    Empty(Vec<serde_json::Value>),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -153,7 +153,7 @@ pub struct GarminSetContainer {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GarminSet {
     #[serde(rename = "setType")]
-    pub set_type: String, 
+    pub set_type: String,
     #[serde(rename = "repetitionCount")]
     pub repetition_count: Option<i32>,
     pub weight: Option<f64>,

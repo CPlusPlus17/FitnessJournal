@@ -41,7 +41,7 @@ export default function GenerateButton() {
                     </div>
                 )}
             </div>
-            <div className="mt-4 text-xs text-gray-500 z-10">Gemini 2.5 Flash</div>
+            <div className="mt-4 text-xs text-gray-500 z-10">Gemini 3.1 Pro Preview</div>
         </div>
     );
 }

@@ -5,4 +5,11 @@ test_*
 garmin_cache.json
 generated_workouts.json
 fitness_journal.db
+*.db-shm
+*.db-wal
 *.pyc
+.env
+*.log
+profiles.json
+dump.json
+today.json
