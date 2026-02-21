@@ -111,7 +111,7 @@ The application also includes a local dashboard to view upcoming scheduled worko
 
 This project was built with reference to the following open-source projects:
 
-- **[garminconnect](https://github.com/cybercoder-naj/garminconnect)** - Python Garmin Connect API wrapper which served as a valuable reference for the Garmin API endpoints.
+- **[garminconnect](https://github.com/cyberjunky/python-garminconnect)** - Python Garmin Connect API wrapper which served as a valuable reference for the Garmin API endpoints.
 - **[garth](https://github.com/matin/garth)** - Garmin SSO OAuth toolkit for Python, which heavily inspired our native Rust login implementation.
 - **[signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api)** - Dockerized REST API wrapper around `signal-cli` that powers our bot's communication with the Signal network.
-- **[react-body-highlighter](https://github.com/manishiitg/react-body-highlighter)** - React component used in the dashboard to visualize muscle fatigue on a human body graphic.
+- **[react-body-highlighter](https://github.com/GV79/react-body-highlighter)** - React component used in the dashboard to visualize muscle fatigue on a human body graphic.

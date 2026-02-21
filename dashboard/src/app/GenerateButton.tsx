@@ -27,11 +27,11 @@ export default function GenerateButton() {
                 }`}></div>
             <h3 className="text-gray-400 font-medium tracking-wide z-10">LLM COACH WORKOUTS</h3>
 
-            <div className="mt-4 flex flex-col items-start gap-4 z-10">
+            <div className="mt-4 flex flex-col gap-4 z-10 w-full">
                 <button
                     onClick={handleGenerate}
                     disabled={loading}
-                    className="bg-white/10 hover:bg-white/20 text-white font-medium py-2 px-6 rounded-full transition-all border border-white/10 hover:border-white/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-2 rounded-full transition-all border border-white/10 hover:border-white/30 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {loading ? 'Generating...' : 'Regenerate Plan'}
                 </button>
