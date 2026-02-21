@@ -182,10 +182,35 @@ impl AiClient {
         }
 
         // If no markers, maybe the raw string is just valid JSON
-        if let Ok(_) = serde_json::from_str::<Value>(markdown) {
+        if serde_json::from_str::<Value>(markdown).is_ok() {
             return Ok(markdown.trim().to_string());
         }
 
         Err(anyhow!("Could not extract JSON block from LLM response"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AiClient;
+
+    #[test]
+    fn extract_json_block_from_markdown() {
+        let markdown = "Here is your plan:\n```json\n[{\"workoutName\":\"FJ-AI:Test\"}]\n```";
+        let extracted = AiClient::extract_json_block(markdown).expect("json block should parse");
+        assert_eq!(extracted, "[{\"workoutName\":\"FJ-AI:Test\"}]");
+    }
+
+    #[test]
+    fn extract_json_block_from_raw_json() {
+        let raw = "{\"ok\":true}";
+        let extracted = AiClient::extract_json_block(raw).expect("raw json should parse");
+        assert_eq!(extracted, "{\"ok\":true}");
+    }
+
+    #[test]
+    fn extract_json_block_rejects_invalid_payload() {
+        let invalid = "not json";
+        assert!(AiClient::extract_json_block(invalid).is_err());
     }
 }

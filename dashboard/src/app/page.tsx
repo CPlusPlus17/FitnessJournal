@@ -3,6 +3,8 @@ import GenerateButton from './GenerateButton';
 import MuscleMap from './MuscleMap';
 import Chat from './Chat';
 
+export const dynamic = 'force-dynamic';
+
 type ProgressionItem = {
   exercise_name: string;
   max_weight: number;
@@ -10,6 +12,44 @@ type ProgressionItem = {
   date: string;
   history?: { weight: number; reps: number; date: string }[];
 };
+
+type CompletedWorkout = {
+  name?: string;
+  type?: string;
+  activity_type?: string;
+  sport?: string;
+  duration?: number;
+  distance?: number;
+  averageHR?: number;
+};
+
+type PlannedWorkout = {
+  title?: string;
+  name?: string;
+  date: string;
+  sport?: string;
+  type?: string;
+  is_race?: boolean;
+  primary_event?: boolean;
+  duration?: number;
+  distance?: number;
+  description?: string;
+};
+
+const FITNESS_API_BASE_URL = (process.env.FITNESS_API_BASE_URL || 'http://fitness-api:3001').replace(/\/+$/, '');
+const FITNESS_API_TOKEN = process.env.FITNESS_API_TOKEN || process.env.API_AUTH_TOKEN;
+
+async function backendFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (FITNESS_API_TOKEN) {
+    headers.set('x-api-token', FITNESS_API_TOKEN);
+  }
+  return fetch(`${FITNESS_API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+    cache: 'no-store',
+  });
+}
 
 function Sparkline({ history }: { history: { weight: number, reps?: number, date: string }[] }) {
   if (!history || history.length < 2) return <div className="text-xs text-gray-600 italic">No trend</div>;
@@ -87,7 +127,7 @@ function Sparkline({ history }: { history: { weight: number, reps?: number, date
 
 async function fetchProgression(): Promise<ProgressionItem[]> {
   try {
-    const res = await fetch('http://localhost:3001/api/progression', { cache: 'no-store' });
+    const res = await backendFetch('/api/progression');
     if (!res.ok) {
       return [];
     }
@@ -110,7 +150,7 @@ type RecoveryItem = {
 
 async function fetchRecovery(): Promise<RecoveryItem> {
   try {
-    const res = await fetch('http://localhost:3001/api/recovery', { cache: 'no-store' });
+    const res = await backendFetch('/api/recovery');
     if (!res.ok) {
       return { body_battery: null, sleep_score: null, training_readiness: null, hrv_status: null, hrv_weekly_avg: null, hrv_last_night_avg: null, rhr_trend: [] };
     }
@@ -122,13 +162,13 @@ async function fetchRecovery(): Promise<RecoveryItem> {
 }
 
 type TodayWorkoutsResponse = {
-  done: any[];
-  planned: any[];
+  done: CompletedWorkout[];
+  planned: PlannedWorkout[];
 };
 
 async function fetchTodayWorkouts(): Promise<TodayWorkoutsResponse> {
   try {
-    const res = await fetch('http://localhost:3001/api/workouts/today', { cache: 'no-store' });
+    const res = await backendFetch('/api/workouts/today');
     if (!res.ok) {
       return { done: [], planned: [] };
     }
@@ -139,9 +179,9 @@ async function fetchTodayWorkouts(): Promise<TodayWorkoutsResponse> {
   }
 }
 
-async function fetchUpcomingWorkouts(): Promise<any[]> {
+async function fetchUpcomingWorkouts(): Promise<PlannedWorkout[]> {
   try {
-    const res = await fetch('http://localhost:3001/api/workouts/upcoming', { cache: 'no-store' });
+    const res = await backendFetch('/api/workouts/upcoming');
     if (!res.ok) {
       return [];
     }
@@ -159,11 +199,11 @@ export default async function Dashboard() {
   const upcomingWorkouts = await fetchUpcomingWorkouts();
 
   // Helper to check if a planned workout is already completed today
-  const isWorkoutDone = (planned: any) => {
+  const isWorkoutDone = (planned: PlannedWorkout) => {
     const pTitle = (planned.title || planned.name || "").toLowerCase();
     const pSport = (planned.sport || planned.type || "").toLowerCase().replace(/_|\s/g, '');
 
-    return todayWorkouts.done.some((done: any) => {
+    return todayWorkouts.done.some((done: CompletedWorkout) => {
       const dName = (done.name || "").toLowerCase();
       const dType = (done.type || done.activity_type || done.sport || "").toLowerCase().replace(/_|\s/g, '');
 
@@ -181,11 +221,11 @@ export default async function Dashboard() {
     });
   };
 
-  const activePlannedWorkouts = todayWorkouts.planned.filter((w: any) => !isWorkoutDone(w));
+  const activePlannedWorkouts = todayWorkouts.planned.filter((w: PlannedWorkout) => !isWorkoutDone(w));
 
   // Filter upcoming workouts: if they are planned for today, check if they are done
-  const todayDates = new Set(todayWorkouts.planned.map((w: any) => w.date));
-  const activeUpcomingWorkouts = upcomingWorkouts.filter((w: any) => {
+  const todayDates = new Set(todayWorkouts.planned.map((w: PlannedWorkout) => w.date));
+  const activeUpcomingWorkouts = upcomingWorkouts.filter((w: PlannedWorkout) => {
     if (todayDates.has(w.date)) {
       return !isWorkoutDone(w);
     }
@@ -287,7 +327,7 @@ export default async function Dashboard() {
                   {todayWorkouts.planned.length > 0 ? "All planned workouts completed for today! ✅" : "No workouts planned for today."}
                 </div>
               </div>
-            ) : activePlannedWorkouts.map((workout: any, idx: number) => (
+            ) : activePlannedWorkouts.map((workout: PlannedWorkout, idx: number) => (
               <div key={idx} className="glass-panel p-5 group relative border border-indigo-500/20">
                 <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 <div className="flex justify-between items-start mb-2">
@@ -315,7 +355,7 @@ export default async function Dashboard() {
               <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700">
                 <div className="text-lg">No upcoming workouts planned.</div>
               </div>
-            ) : activeUpcomingWorkouts.map((workout: any, idx: number) => {
+            ) : activeUpcomingWorkouts.map((workout: PlannedWorkout, idx: number) => {
               const isRace = workout.is_race === true || workout.type === 'race' || workout.type === 'event' || workout.type === 'primaryEvent';
               const isPrimary = workout.primary_event === true || workout.type === 'primaryEvent';
 
@@ -384,7 +424,7 @@ export default async function Dashboard() {
               <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700">
                 <div className="text-lg">No workouts completed today.</div>
               </div>
-            ) : todayWorkouts.done.map((workout: any, idx: number) => (
+            ) : todayWorkouts.done.map((workout: CompletedWorkout, idx: number) => (
               <div key={idx} className="glass-panel p-5 group relative border border-emerald-500/20">
                 <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 <div className="flex justify-between items-start mb-2">

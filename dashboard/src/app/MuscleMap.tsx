@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Model from 'react-body-highlighter';
 
-import type { Muscle } from 'react-body-highlighter/dist/component/metadata';
+import type { IExerciseData, Muscle } from 'react-body-highlighter/dist/component/metadata';
 
 type MuscleMapItem = {
     name: string;
@@ -33,7 +33,7 @@ export default function MuscleMap() {
     useEffect(() => {
         async function fetchData() {
             try {
-                const res = await fetch('http://localhost:3001/api/muscle_heatmap');
+                const res = await fetch('/api/muscle_heatmap');
                 if (res.ok) {
                     const json = await res.json();
                     setData(json);
@@ -74,7 +74,7 @@ export default function MuscleMap() {
                 <div className="flex flex-col items-center">
                     <h4 className="text-sm font-medium text-gray-400 mb-4 tracking-wider uppercase">Anterior (Front)</h4>
                     <Model
-                        data={data as any}
+                        data={data as IExerciseData[]}
                         type="anterior"
                         bodyColor="#1f2937"
                         highlightedColors={FATIGUE_COLORS}
@@ -85,7 +85,7 @@ export default function MuscleMap() {
                 <div className="flex flex-col items-center">
                     <h4 className="text-sm font-medium text-gray-400 mb-4 tracking-wider uppercase">Posterior (Back)</h4>
                     <Model
-                        data={data as any}
+                        data={data as IExerciseData[]}
                         type="posterior"
                         bodyColor="#1f2937"
                         highlightedColors={FATIGUE_COLORS}

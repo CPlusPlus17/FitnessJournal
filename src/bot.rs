@@ -41,8 +41,13 @@ impl BotController {
 
         let signal_number =
             std::env::var("SIGNAL_PHONE_NUMBER").unwrap_or_else(|_| "+1234567890".to_string());
-        let ws_url = format!("ws://127.0.0.1:8080/v1/receive/{}", signal_number);
-        let (ws_stream, _) = match connect_async(ws_url).await {
+
+        // Use environment variable for the host, defaulting to the docker-compose service name
+        let api_host = std::env::var("SIGNAL_API_HOST")
+            .unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
+        let ws_url = format!("ws://{}:8080/v1/receive/{}", api_host, signal_number);
+
+        let (ws_stream, _) = match connect_async(&ws_url).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!(
@@ -107,7 +112,7 @@ impl BotController {
                             processed_msgs.pop_front();
                         }
 
-                        println!("Received Signal message from {}: {}", msg_sender, text_trim);
+                        println!("Received Signal message from {}", msg_sender);
 
                         if text_trim.starts_with('/') {
                             let mut parts = text_trim.splitn(2, ' ');
@@ -220,9 +225,11 @@ impl BotController {
             recipients: vec![recipient.to_string()],
         };
 
+        let api_host = std::env::var("SIGNAL_API_HOST")
+            .unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
         let client = reqwest::Client::new();
         let res = client
-            .post("http://127.0.0.1:8080/v2/send")
+            .post(format!("http://{}:8080/v2/send", api_host))
             .json(&send_req)
             .send()
             .await;

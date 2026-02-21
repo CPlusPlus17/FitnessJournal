@@ -100,7 +100,7 @@ impl WorkoutBuilder {
             .from_path(path)
         {
             let mut records = rdr.records();
-            if let Some(_) = records.next() {} // Skip Group Headers
+            let _ = records.next(); // Skip Group Headers
 
             // Read actual headers to find indexes
             let mut name_idx = 0;
@@ -122,34 +122,32 @@ impl WorkoutBuilder {
                 }
             }
 
-            for result in records {
-                if let Ok(row) = result {
-                    if let (Some(name), Some(cat), Some(id)) =
-                        (row.get(name_idx), row.get(cat_idx), row.get(id_idx))
-                    {
-                        let human_name = name.trim().to_uppercase();
-                        let cat_key = cat.trim().to_string();
-                        let ex_key = id.trim().to_string();
+            for row in records.flatten() {
+                if let (Some(name), Some(cat), Some(id)) =
+                    (row.get(name_idx), row.get(cat_idx), row.get(id_idx))
+                {
+                    let human_name = name.trim().to_uppercase();
+                    let cat_key = cat.trim().to_string();
+                    let ex_key = id.trim().to_string();
 
-                        if !human_name.is_empty() && !cat_key.is_empty() && !ex_key.is_empty() {
-                            let val = (cat_key.clone(), ex_key.clone());
+                    if !human_name.is_empty() && !cat_key.is_empty() && !ex_key.is_empty() {
+                        let val = (cat_key.clone(), ex_key.clone());
 
-                            self.exercise_db.insert(human_name.clone(), val.clone());
-                            self.exercise_db.insert(ex_key.clone(), val.clone());
-                            self.exercise_db
-                                .insert(human_name.replace(" ", "_"), val.clone());
-                            self.exercise_db
-                                .insert(ex_key.replace("_", " "), val.clone());
-                            self.exercise_db.insert(
-                                human_name
-                                    .replace("-", "")
-                                    .replace(" ", "")
-                                    .replace("_", ""),
-                                val.clone(),
-                            );
-                            self.exercise_db
-                                .insert(ex_key.replace("_", "").replace("-", ""), val);
-                        }
+                        self.exercise_db.insert(human_name.clone(), val.clone());
+                        self.exercise_db.insert(ex_key.clone(), val.clone());
+                        self.exercise_db
+                            .insert(human_name.replace(" ", "_"), val.clone());
+                        self.exercise_db
+                            .insert(ex_key.replace("_", " "), val.clone());
+                        self.exercise_db.insert(
+                            human_name
+                                .replace("-", "")
+                                .replace(" ", "")
+                                .replace("_", ""),
+                            val.clone(),
+                        );
+                        self.exercise_db
+                            .insert(ex_key.replace("_", "").replace("-", ""), val);
                     }
                 }
             }
@@ -289,26 +287,26 @@ impl WorkoutBuilder {
                 let mut end_cond_key = CONDITION_LAP_BUTTON;
                 let mut end_val: Option<Value> = None;
 
-                if reps.is_some()
-                    && step_type_id != STEP_TYPE_ID_WARMUP
-                    && step_type_id != STEP_TYPE_ID_COOLDOWN
-                {
-                    if let Some(r_str) = reps.unwrap().as_str() {
-                        if r_str.to_uppercase().contains("AMRAP") {
-                            end_cond_id = CONDITION_ID_LAP_BUTTON;
-                            end_cond_key = CONDITION_LAP_BUTTON;
-                        } else if let Ok(n) = r_str.parse::<i64>() {
+                if let Some(reps_value) = reps {
+                    if step_type_id != STEP_TYPE_ID_WARMUP && step_type_id != STEP_TYPE_ID_COOLDOWN
+                    {
+                        if let Some(r_str) = reps_value.as_str() {
+                            if r_str.to_uppercase().contains("AMRAP") {
+                                end_cond_id = CONDITION_ID_LAP_BUTTON;
+                                end_cond_key = CONDITION_LAP_BUTTON;
+                            } else if let Ok(n) = r_str.parse::<i64>() {
+                                end_val = Some(json!(n));
+                                end_cond_id = CONDITION_ID_REPS;
+                                end_cond_key = CONDITION_REPS;
+                            } else {
+                                end_cond_id = CONDITION_ID_LAP_BUTTON;
+                                end_cond_key = CONDITION_LAP_BUTTON;
+                            }
+                        } else if let Some(n) = reps_value.as_i64() {
                             end_val = Some(json!(n));
                             end_cond_id = CONDITION_ID_REPS;
                             end_cond_key = CONDITION_REPS;
-                        } else {
-                            end_cond_id = CONDITION_ID_LAP_BUTTON;
-                            end_cond_key = CONDITION_LAP_BUTTON;
                         }
-                    } else if let Some(n) = reps.unwrap().as_i64() {
-                        end_val = Some(json!(n));
-                        end_cond_id = CONDITION_ID_REPS;
-                        end_cond_key = CONDITION_REPS;
                     }
                 } else if let Some(d) = duration {
                     if let Some(sec) = Self::parse_duration(d) {
@@ -318,7 +316,7 @@ impl WorkoutBuilder {
                     }
                 }
 
-                let weight_val = step.get("weight").and_then(|w| Self::parse_weight(w));
+                let weight_val = step.get("weight").and_then(Self::parse_weight);
 
                 let mut category = cat_key.clone();
                 let mut exercise_name = ex_key.clone();
@@ -369,18 +367,17 @@ impl WorkoutBuilder {
 
                 if let Some(w) = weight_val {
                     if !robust {
-                        step_dict
-                            .as_object_mut()
-                            .unwrap()
-                            .insert("weightValue".to_string(), json!(w));
-                        step_dict.as_object_mut().unwrap().insert(
-                            "weightUnit".to_string(),
-                            json!({
-                                "unitId": UNIT_ID_KILOGRAM,
-                                "unitKey": UNIT_KILOGRAM,
-                                "factor": 1000.0
-                            }),
-                        );
+                        if let Some(step_obj) = step_dict.as_object_mut() {
+                            step_obj.insert("weightValue".to_string(), json!(w));
+                            step_obj.insert(
+                                "weightUnit".to_string(),
+                                json!({
+                                    "unitId": UNIT_ID_KILOGRAM,
+                                    "unitKey": UNIT_KILOGRAM,
+                                    "factor": 1000.0
+                                }),
+                            );
+                        }
                     }
                 }
 
@@ -439,5 +436,26 @@ impl WorkoutBuilder {
                 }
             ]
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkoutBuilder;
+    use serde_json::json;
+
+    #[test]
+    fn parse_duration_handles_minutes_text() {
+        assert_eq!(WorkoutBuilder::parse_duration(&json!("12min")), Some(720));
+    }
+
+    #[test]
+    fn parse_duration_handles_integer_seconds() {
+        assert_eq!(WorkoutBuilder::parse_duration(&json!(90)), Some(90));
+    }
+
+    #[test]
+    fn parse_weight_handles_numeric_string() {
+        assert_eq!(WorkoutBuilder::parse_weight(&json!("42.5kg")), Some(42.5));
     }
 }

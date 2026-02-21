@@ -7,6 +7,17 @@ pub struct CoachContext {
     pub available_equipment: Vec<String>,
 }
 
+pub struct BriefInput<'a> {
+    pub detailed_activities: &'a [crate::models::GarminActivity],
+    pub plans: &'a [crate::models::GarminPlan],
+    pub profile: &'a Option<crate::models::GarminProfile>,
+    pub metrics: &'a Option<crate::models::GarminMaxMetrics>,
+    pub scheduled_workouts: &'a [crate::models::ScheduledWorkout],
+    pub recovery_metrics: &'a Option<crate::models::GarminRecoveryMetrics>,
+    pub context: &'a CoachContext,
+    pub progression_history: &'a [String],
+}
+
 pub struct Coach;
 
 impl Coach {
@@ -173,17 +184,17 @@ impl Coach {
         }
     }
 
-    pub fn generate_brief(
-        &self,
-        detailed_activities: &[crate::models::GarminActivity],
-        plans: &[crate::models::GarminPlan],
-        profile: &Option<crate::models::GarminProfile>,
-        metrics: &Option<crate::models::GarminMaxMetrics>,
-        scheduled_workouts: &[crate::models::ScheduledWorkout],
-        recovery_metrics: &Option<crate::models::GarminRecoveryMetrics>,
-        context: &CoachContext,
-        progression_history: &[String],
-    ) -> String {
+    pub fn generate_brief(&self, input: BriefInput<'_>) -> String {
+        let BriefInput {
+            detailed_activities,
+            plans,
+            profile,
+            metrics,
+            scheduled_workouts,
+            recovery_metrics,
+            context,
+            progression_history,
+        } = input;
         let now = Utc::now();
         let mut brief = String::new();
 
@@ -214,7 +225,7 @@ impl Coach {
                     dist
                 ));
             }
-            brief.push_str("\n");
+            brief.push('\n');
         }
 
         if let Some(rec) = recovery_metrics {
@@ -246,10 +257,10 @@ impl Coach {
                     })
                     .collect();
                 brief.push_str(&trend_strs.join(", "));
-                brief.push_str("\n");
+                brief.push('\n');
             }
 
-            brief.push_str("\n");
+            brief.push('\n');
         }
 
         // 2. Athlete Profile
@@ -276,7 +287,7 @@ impl Coach {
                 brief.push_str(&format!("- **Fitness Age**: {}\n", fa));
             }
         }
-        brief.push_str("\n");
+        brief.push('\n');
 
         // 3. Goals & Constraints
         brief.push_str("## Goals & Context\n");
@@ -364,7 +375,7 @@ impl Coach {
         for c in &context.constraints {
             brief.push_str(&format!("- {}\n", c));
         }
-        brief.push_str("\n");
+        brief.push('\n');
 
         // 4. Status Update (30 Days)
         let thirty_days_ago = now - Duration::days(30);
@@ -532,7 +543,7 @@ impl Coach {
                 }
             }
         }
-        brief.push_str("\n");
+        brief.push('\n');
 
         if !progression_history.is_empty() {
             brief.push_str(
@@ -552,7 +563,7 @@ impl Coach {
             for (mg, vol) in sorted_volumes {
                 brief.push_str(&format!("- **{}**: {} sets\n", mg, vol));
             }
-            brief.push_str("\n");
+            brief.push('\n');
         }
 
         // 6. Required Output

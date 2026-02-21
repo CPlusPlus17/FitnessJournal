@@ -1,9 +1,13 @@
-# Use official Rust image to build the binary
-FROM rust:1.80-slim-bullseye AS builder
+FROM rust:1.88-slim AS builder
 
 WORKDIR /app
 # We need system dependencies for some rust crates (e.g. SQLite, pkg-config, libssl-dev)
-RUN apt-get update && apt-get install -y pkg-config libssl-dev libsqlite3-dev sqlite3
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    libsqlite3-dev \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
@@ -14,15 +18,13 @@ RUN cargo build --release
 #======================================
 # Runtime Stage
 #======================================
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install system dependencies
-# sqlite3 is required for the database, ca-certificates for ssl requests
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    sqlite3 \
-    libsqlite3-dev \
+    --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

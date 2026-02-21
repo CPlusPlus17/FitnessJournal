@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     println!("Starting Fitness Coach...");
 
     let database = Arc::new(Mutex::new(
@@ -52,7 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-
     if args.contains(&"--delete-workouts".to_string()) {
         println!("Fetching workouts to delete...");
         match garmin_client.api.get_workouts().await {
@@ -61,12 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut to_delete = Vec::new();
                     for w in arr {
                         if let Some(name) = w.get("workoutName").and_then(|n| n.as_str()) {
-                            if name.starts_with("Strength")
-                                || name.starts_with("Test")
-                                || name.starts_with("Full Body")
-                                || name.starts_with("Upper")
-                                || name.starts_with("Lower")
-                            {
+                            if crate::garmin_client::is_ai_managed_workout(name) {
                                 if let Some(wid) = w.get("workoutId").and_then(|i| i.as_i64()) {
                                     to_delete.push((wid, name.to_string()));
                                 }
@@ -117,14 +111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::garmin_login::login_step_1(email, &password).await {
             Ok(crate::garmin_login::LoginResult::Success(o1, o2)) => {
                 println!("Login successful!");
-                std::fs::write(
-                    "secrets/oauth1_token.json",
-                    serde_json::to_string_pretty(&o1)?,
-                )?;
-                std::fs::write(
-                    "secrets/oauth2_token.json",
-                    serde_json::to_string_pretty(&o2)?,
-                )?;
+                write_secret_json_file("secrets/oauth1_token.json", &o1)?;
+                write_secret_json_file("secrets/oauth2_token.json", &o2)?;
                 println!(
                     "Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json"
                 );
@@ -140,14 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match crate::garmin_login::login_step_2_mfa(session, mfa_code).await {
                     Ok((o1, o2)) => {
                         println!("MFA successful!");
-                        std::fs::write(
-                            "secrets/oauth1_token.json",
-                            serde_json::to_string_pretty(&o1)?,
-                        )?;
-                        std::fs::write(
-                            "secrets/oauth2_token.json",
-                            serde_json::to_string_pretty(&o2)?,
-                        )?;
+                        write_secret_json_file("secrets/oauth1_token.json", &o1)?;
+                        write_secret_json_file("secrets/oauth2_token.json", &o2)?;
                         println!("Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json");
                     }
                     Err(e) => println!("MFA login failed: {}", e),
@@ -287,20 +269,23 @@ pub async fn run_coach_pipeline(
 
     // Generate Brief
     println!("\nGenerating Coach Brief...");
-    let brief = coach.generate_brief(
-        &detailed_activities,
-        &active_plans,
-        &user_profile,
-        &max_metrics,
-        &scheduled_workouts,
-        &recovery,
-        &context,
-        &progression_history,
-    );
+    let brief = coach.generate_brief(crate::coaching::BriefInput {
+        detailed_activities: &detailed_activities,
+        plans: &active_plans,
+        profile: &user_profile,
+        metrics: &max_metrics,
+        scheduled_workouts: &scheduled_workouts,
+        recovery_metrics: &recovery,
+        context: &context,
+        progression_history: &progression_history,
+    });
 
-    println!("===================================================");
-    println!("{}", brief);
-    println!("===================================================");
+    println!("Coach brief generated ({} characters).", brief.len());
+    if std::env::var("FITNESS_DEBUG_PROMPT").is_ok() {
+        println!("===================================================");
+        println!("{}", brief);
+        println!("===================================================");
+    }
 
     if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
         println!("\nGEMINI_API_KEY found! Generating workout via Gemini 3.1 Pro Preview...");
@@ -346,8 +331,13 @@ pub async fn run_coach_pipeline(
                         // Upload to Garmin
                         println!("Uploading to Garmin Connect...");
                         let builder = crate::workout_builder::WorkoutBuilder::new();
-                        let parsed: serde_json::Value =
-                            serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
+                        let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                eprintln!("Failed to parse generated JSON: {}", e);
+                                return Ok(());
+                            }
+                        };
 
                         let workouts = if let Some(arr) = parsed.as_array() {
                             arr.clone()
@@ -356,11 +346,27 @@ pub async fn run_coach_pipeline(
                         };
 
                         for w in workouts {
-                            if let Some(name) = w.get("workoutName").and_then(|n| n.as_str()) {
+                            let mut workout_spec = w;
+                            if let Some(obj) = workout_spec.as_object_mut() {
+                                let current_name = obj
+                                    .get("workoutName")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("Imported Strength Workout");
+                                obj.insert(
+                                    "workoutName".to_string(),
+                                    serde_json::Value::String(
+                                        crate::garmin_client::ensure_ai_workout_name(current_name),
+                                    ),
+                                );
+                            }
+
+                            if let Some(name) =
+                                workout_spec.get("workoutName").and_then(|n| n.as_str())
+                            {
                                 println!("Creating workout: {}...", name);
                             }
 
-                            let mut payload = builder.build_workout_payload(&w, false);
+                            let mut payload = builder.build_workout_payload(&workout_spec, false);
                             let mut workout_id = None;
 
                             // Trying normal payload
@@ -379,7 +385,8 @@ pub async fn run_coach_pipeline(
                                 Err(e) => {
                                     if e.to_string().contains("400") {
                                         println!("Failed with CSV mapping (400). Retrying with generic fallback...");
-                                        payload = builder.build_workout_payload(&w, true);
+                                        payload =
+                                            builder.build_workout_payload(&workout_spec, true);
                                         match garmin_client
                                             .api
                                             .connectapi_post("/workout-service/workout", &payload)
@@ -407,9 +414,10 @@ pub async fn run_coach_pipeline(
                                 }
                             }
 
-                            if let (Some(id), Some(sch_date)) =
-                                (workout_id, w.get("scheduledDate").and_then(|d| d.as_str()))
-                            {
+                            if let (Some(id), Some(sch_date)) = (
+                                workout_id,
+                                workout_spec.get("scheduledDate").and_then(|d| d.as_str()),
+                            ) {
                                 println!("Scheduling workout {} on {}...", id, sch_date);
                                 let sched_payload = serde_json::json!({ "date": sch_date });
                                 let sched_endpoint = format!("/workout-service/schedule/{}", id);
@@ -426,7 +434,9 @@ pub async fn run_coach_pipeline(
                     }
                     Err(e) => {
                         eprintln!("Could not extract JSON from AI response: {}", e);
-                        println!("Raw Response:\n{}", markdown_response);
+                        if std::env::var("FITNESS_DEBUG_PROMPT").is_ok() {
+                            println!("Raw Response:\n{}", markdown_response);
+                        }
                     }
                 }
             }
@@ -436,5 +446,18 @@ pub async fn run_coach_pipeline(
         println!("\nNo GEMINI_API_KEY set. Skipping automatic workout generation.");
     }
 
+    Ok(())
+}
+
+fn write_secret_json_file<T: serde::Serialize>(
+    path: &str,
+    value: &T,
+) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::write(path, serde_json::to_string_pretty(value)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
 }

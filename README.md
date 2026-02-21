@@ -26,6 +26,16 @@ Clone the repository and set up your core configuration files:
 
    # The phone number the bot will use, including country code (e.g., +41796000000)
    SIGNAL_PHONE_NUMBER=your_bot_phone_number
+
+   # Optional but recommended: protect the Rust API with a shared token.
+   # When set, every API request must include this token.
+   API_AUTH_TOKEN=change_me_to_a_long_random_value
+
+   # Optional: bind API host/port (defaults to 127.0.0.1:3001)
+   API_BIND_ADDR=127.0.0.1:3001
+
+   # Optional: comma-separated origins allowed by CORS (defaults to http://localhost:3000)
+   CORS_ALLOWED_ORIGINS=http://localhost:3000
    ```
 
 2. Log in to Garmin to generate your tokens:
@@ -43,29 +53,30 @@ The Signal API runs in its own container (`signal-cli-rest-api`). You must regis
 docker-compose up -d signal-api
 ```
 
-Once it's running, you have two ways to register:
+#### Registering via QR Code (Secondary Device Link)
+The easiest way to register is to link the bot as a secondary device to an existing Signal account using a QR code.
 
-#### Option A: Using the Swagger UI (Recommended)
-1. Open your browser and navigate to `http://127.0.0.1:8080/q/swagger-ui/`
-2. Scroll to the **General** section and find `POST /v1/register/{number}`.
-3. Click "Try it out". Enter your bot's phone number exactly as written in your `.env` file (e.g., `+41796000000`).
-4. If you are using a landline or VoIP number that can only receive calls, change `"use_voice": false` to `true` in the request body. Execute the request.
-5. You will receive an SMS or a voice call with a 6-digit code.
-6. Still in the Swagger UI, navigate to `POST /v1/register/{number}/verify/{code}`.
-7. Enter your phone number and the 6-digit code to complete registration.
+Since the Signal API runs in `json-rpc` performance mode by default (which disables the QR code endpoint), we need to start it in `normal` mode temporarily:
 
-#### Option B: Using curl
-1. Request an SMS code:
-   ```bash
-   curl -X POST 'http://127.0.0.1:8080/v1/register/+1234567890' \
-        -H 'accept: application/json' \
-        -H 'Content-Type: application/json' \
-        -d '{"use_voice": false}' # set to true for voice call
+1. Edit your `docker-compose.yml` and temporarily change `MODE=json-rpc` to `MODE=normal`:
+   ```yaml
+     signal-api:
+       image: bbernhard/signal-cli-rest-api:latest
+       environment:
+         - MODE=normal # <-- Change this temporarily
    ```
-2. Verify the code:
+
+2. Restart the API container:
    ```bash
-   curl -X POST 'http://127.0.0.1:8080/v1/register/+1234567890/verify/123456'
+   docker-compose up -d signal-api
    ```
+
+3. Open your browser and navigate to:
+   `http://127.0.0.1:8080/v1/qrcodelink?device_name=Fitness-Coach`
+
+4. A QR code will be displayed. Open the Signal app on your phone, go to **Settings -> Linked Devices -> + (Add New Device)**, and scan the QR code on your screen.
+
+5. **Important:** Once linked, change `MODE=normal` back to `MODE=json-rpc` in your `docker-compose.yml`!
 
 ### 3. Running the Complete Application
 
@@ -76,6 +87,58 @@ docker-compose up -d --build
 ```
 
 This will build the Rust binary and start the `fitness-coach` bot daemon alongside the `signal-api`.
+
+## Release Checklist
+
+Use this checklist to publish safely.
+
+### 1. Prepare Environment
+
+1. Copy `.env.example` to `.env`.
+2. Copy `dashboard/.env.example` to `dashboard/.env`.
+3. Set secure values:
+   - `API_AUTH_TOKEN`: long random secret.
+   - `FITNESS_API_TOKEN`: same value as `API_AUTH_TOKEN`.
+   - `CORS_ALLOWED_ORIGINS`: only your real frontend origin(s).
+   - `API_BIND_ADDR`: keep `127.0.0.1:3001` unless intentionally exposing behind a reverse proxy.
+4. Confirm Garmin token files exist:
+   - `secrets/oauth1_token.json`
+   - `secrets/oauth2_token.json`
+
+### 2. Run Preflight
+
+```bash
+./scripts/publish-preflight.sh
+```
+
+Required outcome: all checks pass.
+
+### 3. Build and Launch
+
+```bash
+docker-compose up -d --build
+```
+
+After deployment:
+
+1. Verify API health from a trusted host with token:
+   - `curl -H "x-api-token: $API_AUTH_TOKEN" http://127.0.0.1:3001/api/progression`
+2. Verify dashboard loads and data cards populate.
+3. Trigger one generation and confirm only `FJ-AI:` workouts are created/deleted.
+
+### 4. Security Validation
+
+1. Confirm Signal REST API is localhost-only (`127.0.0.1:8080`).
+2. Confirm `FITNESS_DEBUG_PROMPT` is not set in production.
+3. Confirm secrets and DB files are not committed (`.env`, `secrets/*`, `*.db*`).
+4. Confirm API rejects unauthenticated requests when `API_AUTH_TOKEN` is set.
+
+### 5. Rollback Plan
+
+1. Stop services:
+   - `docker-compose down`
+2. Re-deploy the previous known-good image/commit.
+3. Restore previous `.env` and `secrets/` backup if needed.
 
 ## Usage
 
@@ -99,6 +162,10 @@ The application also includes a local dashboard to view upcoming scheduled worko
    ```bash
    cargo run -- --api
    ```
+   The dashboard can authenticate against the backend via:
+   - `FITNESS_API_BASE_URL` (default: `http://127.0.0.1:3001`)
+   - `FITNESS_API_TOKEN` (should match `API_AUTH_TOKEN` if auth is enabled)
+
 2. In a separate terminal, start the Next.js frontend:
    ```bash
    cd dashboard

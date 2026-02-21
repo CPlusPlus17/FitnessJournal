@@ -10,12 +10,12 @@ export default function GenerateButton() {
         setLoading(true);
         setResult(null);
         try {
-            const res = await fetch('http://localhost:3001/api/generate', {
+            const res = await fetch('/api/generate', {
                 method: 'POST',
             });
             const data = await res.json();
             setResult(data);
-        } catch (err) {
+        } catch {
             setResult({ status: 'error', message: 'Network error or Rust backend not running.' });
         }
         setLoading(false);

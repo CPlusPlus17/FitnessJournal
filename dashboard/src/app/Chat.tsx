@@ -8,6 +8,12 @@ type ChatMessage = {
     content: string;
 };
 
+function stripNode<T extends { node?: unknown }>(props: T): Omit<T, 'node'> {
+    const { node, ...rest } = props;
+    void node;
+    return rest;
+}
+
 export default function Chat() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
@@ -16,7 +22,7 @@ export default function Chat() {
 
     const fetchChat = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/chat');
+            const res = await fetch('/api/chat');
             if (res.ok) {
                 const data = await res.json();
                 setMessages(data);
@@ -49,7 +55,7 @@ export default function Chat() {
         setLoading(true);
 
         try {
-            const res = await fetch('http://localhost:3001/api/chat', {
+            const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: userMessage }),
@@ -81,24 +87,25 @@ export default function Chat() {
                         <div className="text-sm leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
                             <ReactMarkdown
                                 components={{
-                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                                    strong: ({ node, ...props }) => <strong className="font-semibold text-white/90" {...props} />,
-                                    ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-2 space-y-1" {...props} />,
-                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-2 space-y-1" {...props} />,
-                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                    h1: ({ node, ...props }) => <h1 className="text-lg font-bold text-white mb-2 mt-4" {...props} />,
-                                    h2: ({ node, ...props }) => <h2 className="text-base font-bold text-white mb-2 mt-3" {...props} />,
-                                    h3: ({ node, ...props }) => <h3 className="text-sm font-bold text-white mb-2 mt-2" {...props} />,
-                                    pre: ({ node, ...props }) => <pre className="bg-black/60 p-3 rounded mb-2 overflow-x-auto text-xs font-mono" {...props} />,
-                                    code: ({ node, className, ...props }) => {
+                                    p: (props) => <p className="mb-2 last:mb-0" {...stripNode(props)} />,
+                                    strong: (props) => <strong className="font-semibold text-white/90" {...stripNode(props)} />,
+                                    ul: (props) => <ul className="list-disc pl-5 mb-2 space-y-1" {...stripNode(props)} />,
+                                    ol: (props) => <ol className="list-decimal pl-5 mb-2 space-y-1" {...stripNode(props)} />,
+                                    li: (props) => <li className="pl-1" {...stripNode(props)} />,
+                                    h1: (props) => <h1 className="text-lg font-bold text-white mb-2 mt-4" {...stripNode(props)} />,
+                                    h2: (props) => <h2 className="text-base font-bold text-white mb-2 mt-3" {...stripNode(props)} />,
+                                    h3: (props) => <h3 className="text-sm font-bold text-white mb-2 mt-2" {...stripNode(props)} />,
+                                    pre: (props) => <pre className="bg-black/60 p-3 rounded mb-2 overflow-x-auto text-xs font-mono" {...stripNode(props)} />,
+                                    code: (props) => {
+                                        const { className, ...rest } = stripNode(props);
                                         // Next.js uses standard React types, we will just pass it down and add our own classes.
                                         // If it's inside a pre (handled by react-markdown), we probably don't want bg/px if it's block, 
                                         // but a simple style handles inline code.
                                         const match = /language-(\w+)/.exec(className || '')
                                         return !match ? (
-                                            <code className="bg-white/10 px-1.5 py-0.5 rounded text-xs break-words" {...props} />
+                                            <code className="bg-white/10 px-1.5 py-0.5 rounded text-xs break-words" {...rest} />
                                         ) : (
-                                            <code className={className} {...props} />
+                                            <code className={className} {...rest} />
                                         )
                                     }
                                 }}

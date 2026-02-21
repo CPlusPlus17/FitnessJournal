@@ -22,7 +22,7 @@ pub struct GarminLoginSession {
 }
 
 pub enum LoginResult {
-    Success(OAuth1Token, OAuth2Token),
+    Success(OAuth1Token, Box<OAuth2Token>),
     MfaRequired(GarminLoginSession),
 }
 
@@ -122,7 +122,7 @@ pub async fn login_step_1(email: &str, password: &str) -> Result<LoginResult> {
     let ticket = extract_ticket(&result_html)?;
     complete_login(session.client, ticket)
         .await
-        .map(|(o1, o2)| LoginResult::Success(o1, o2))
+        .map(|(o1, o2)| LoginResult::Success(o1, Box::new(o2)))
 }
 
 pub async fn login_step_2_mfa(

@@ -1,13 +1,26 @@
-use axum::{extract::State, routing::get, Json, Router};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use axum::{
+    extract::{DefaultBodyLimit, Request, State},
+    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::VecDeque,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use crate::coaching::Coach;
 use crate::db::Database;
 use crate::garmin_client::GarminClient;
-use serde::{Deserialize, Serialize};
+
+const MAX_CHAT_INPUT_LEN: usize = 4_000;
 
 #[derive(Serialize)]
 pub struct ChatMessage {
@@ -20,11 +33,49 @@ pub struct ChatInput {
     pub content: String,
 }
 
+#[derive(Debug)]
+struct SlidingWindowLimiter {
+    max_requests: usize,
+    window: Duration,
+    hits: VecDeque<Instant>,
+}
+
+impl SlidingWindowLimiter {
+    fn new(max_requests: usize, window: Duration) -> Self {
+        Self {
+            max_requests,
+            window,
+            hits: VecDeque::new(),
+        }
+    }
+
+    fn allow(&mut self) -> bool {
+        let now = Instant::now();
+        while let Some(oldest) = self.hits.front() {
+            if now.duration_since(*oldest) > self.window {
+                self.hits.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if self.hits.len() >= self.max_requests {
+            return false;
+        }
+
+        self.hits.push_back(now);
+        true
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiState {
-    pub database: Arc<Mutex<Database>>,
-    pub garmin_client: Arc<GarminClient>,
-    pub coach: Arc<Coach>,
+    database: Arc<Mutex<Database>>,
+    garmin_client: Arc<GarminClient>,
+    coach: Arc<Coach>,
+    api_auth_token: Option<String>,
+    chat_limiter: Arc<Mutex<SlidingWindowLimiter>>,
+    generate_limiter: Arc<Mutex<SlidingWindowLimiter>>,
 }
 
 #[derive(Serialize)]
@@ -60,21 +111,110 @@ pub struct RecoveryResponse {
     pub rhr_trend: Vec<i32>,
 }
 
+fn env_usize(var_name: &str, default_value: usize) -> usize {
+    std::env::var(var_name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default_value)
+}
+
+fn cors_origins() -> Vec<HeaderValue> {
+    let raw = std::env::var("CORS_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+    let mut origins = Vec::new();
+    for origin in raw.split(',') {
+        let trimmed = origin.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Ok(header_value) = HeaderValue::from_str(trimmed) {
+            origins.push(header_value);
+        }
+    }
+
+    if origins.is_empty() {
+        origins.push(HeaderValue::from_static("http://localhost:3000"));
+    }
+
+    origins
+}
+
+fn has_valid_api_token(headers: &HeaderMap, expected: &str) -> bool {
+    if let Some(value) = headers.get("x-api-token") {
+        if let Ok(token) = value.to_str() {
+            if token == expected {
+                return true;
+            }
+        }
+    }
+
+    if let Some(value) = headers.get(header::AUTHORIZATION) {
+        if let Ok(raw) = value.to_str() {
+            if let Some(token) = raw.strip_prefix("Bearer ") {
+                return token == expected;
+            }
+        }
+    }
+
+    false
+}
+
+async fn auth_middleware(State(state): State<ApiState>, request: Request, next: Next) -> Response {
+    if request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
+
+    if let Some(expected_token) = &state.api_auth_token {
+        if !has_valid_api_token(request.headers(), expected_token) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": "Unauthorized"
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    next.run(request).await
+}
+
 pub async fn run_server(
     database: Arc<Mutex<Database>>,
     garmin_client: Arc<GarminClient>,
     coach: Arc<Coach>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let auth_token = std::env::var("API_AUTH_TOKEN")
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty());
+
     let state = ApiState {
         database,
         garmin_client,
         coach,
+        api_auth_token: auth_token,
+        chat_limiter: Arc::new(Mutex::new(SlidingWindowLimiter::new(
+            env_usize("CHAT_RATE_LIMIT_PER_MINUTE", 30),
+            Duration::from_secs(60),
+        ))),
+        generate_limiter: Arc::new(Mutex::new(SlidingWindowLimiter::new(
+            env_usize("GENERATE_RATE_LIMIT_PER_HOUR", 6),
+            Duration::from_secs(60 * 60),
+        ))),
     };
 
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(cors_origins())
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            HeaderName::from_static("x-api-token"),
+        ]);
 
     let app = Router::new()
         .route("/api/progression", get(get_progression))
@@ -84,10 +224,19 @@ pub async fn run_server(
         .route("/api/generate", axum::routing::post(trigger_generate))
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
-        .layer(cors)
-        .with_state(state);
+        .with_state(state.clone())
+        .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(middleware::from_fn_with_state(state, auth_middleware))
+        .layer(cors);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
+    let bind_addr = std::env::var("API_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3001".to_string());
+    let addr: SocketAddr = bind_addr.parse().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Invalid API_BIND_ADDR '{}': {}", bind_addr, e),
+        )
+    })?;
+
     println!("API Server running at http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -96,7 +245,19 @@ pub async fn run_server(
     Ok(())
 }
 
-async fn trigger_generate(State(state): State<ApiState>) -> Json<serde_json::Value> {
+async fn trigger_generate(
+    State(state): State<ApiState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !state.generate_limiter.lock().await.allow() {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "Rate limit exceeded for /api/generate"
+            })),
+        ));
+    }
+
     match crate::run_coach_pipeline(
         state.garmin_client.clone(),
         state.coach.clone(),
@@ -104,17 +265,24 @@ async fn trigger_generate(State(state): State<ApiState>) -> Json<serde_json::Val
     )
     .await
     {
-        Ok(_) => Json(
-            serde_json::json!({ "status": "success", "message": "Workouts generated and pushed to Garmin" }),
-        ),
-        Err(e) => Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
+        Ok(_) => Ok(Json(serde_json::json!({
+            "status": "success",
+            "message": "Workouts generated and pushed to Garmin"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            })),
+        )),
     }
 }
 
 async fn get_chat(State(state): State<ApiState>) -> Json<Vec<ChatMessage>> {
     let db = state.database.lock().await;
     let history = db.get_ai_chat_history().unwrap_or_default();
-    let mut resp = Vec::new();
+    let mut resp = Vec::with_capacity(history.len());
     for (role, content) in history {
         resp.push(ChatMessage { role, content });
     }
@@ -124,41 +292,95 @@ async fn get_chat(State(state): State<ApiState>) -> Json<Vec<ChatMessage>> {
 async fn post_chat(
     State(state): State<ApiState>,
     Json(input): Json<ChatInput>,
-) -> Json<serde_json::Value> {
-    if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
-        let ai_client = crate::ai_client::AiClient::new(gemini_key);
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !state.chat_limiter.lock().await.allow() {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "Rate limit exceeded for /api/chat"
+            })),
+        ));
+    }
 
-        {
+    let content = input.content.trim();
+    if content.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "Chat content cannot be empty"
+            })),
+        ));
+    }
+
+    if content.chars().count() > MAX_CHAT_INPUT_LEN {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": format!("Chat content exceeds {} characters", MAX_CHAT_INPUT_LEN)
+            })),
+        ));
+    }
+
+    let gemini_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "No API key"
+            })),
+        )
+    })?;
+
+    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+
+    {
+        let db = state.database.lock().await;
+        if let Err(e) = db.add_ai_chat_message("user", content) {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to save input: {}", e)
+                })),
+            ));
+        }
+    }
+
+    let history = state
+        .database
+        .lock()
+        .await
+        .get_ai_chat_history()
+        .unwrap_or_default();
+
+    match ai_client.chat_with_history(&history).await {
+        Ok(response) => {
             let db = state.database.lock().await;
-            if let Err(e) = db.add_ai_chat_message("user", &input.content) {
-                return Json(
-                    serde_json::json!({ "status": "error", "message": format!("Failed to save input: {}", e) }),
-                );
+            if let Err(e) = db.add_ai_chat_message("model", &response) {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Failed to save model response: {}", e)
+                    })),
+                ));
             }
+
+            Ok(Json(serde_json::json!({
+                "status": "success",
+                "message": "Responded"
+            })))
         }
-
-        let history = state
-            .database
-            .lock()
-            .await
-            .get_ai_chat_history()
-            .unwrap_or_default();
-
-        match ai_client.chat_with_history(&history).await {
-            Ok(response) => {
-                {
-                    let db = state.database.lock().await;
-                    let _ = db.add_ai_chat_message("model", &response);
-                }
-
-                // For now, we only push workouts to Garmin in the primary generation run.
-                // Any JSON provided in chat could be applied later.
-                Json(serde_json::json!({ "status": "success", "message": "Responded" }))
-            }
-            Err(e) => Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
-        }
-    } else {
-        Json(serde_json::json!({ "status": "error", "message": "No API key" }))
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            })),
+        )),
     }
 }
 
@@ -166,7 +388,7 @@ async fn get_progression(State(state): State<ApiState>) -> Json<Vec<ProgressionR
     let db = state.database.lock().await;
     let history = db.get_progression_history_raw().unwrap_or_default();
 
-    let mut response = Vec::new();
+    let mut response = Vec::with_capacity(history.len());
     for (name, weight, reps, date, trend_history) in history {
         let history_points = trend_history
             .into_iter()
@@ -218,8 +440,6 @@ async fn get_recovery(State(state): State<ApiState>) -> Json<RecoveryResponse> {
             response.hrv_last_night_avg = metrics.hrv_last_night_avg;
             response.rhr_trend = metrics.rhr_trend;
         }
-    } else {
-        println!("Garmin fetch_data() failed in get_recovery");
     }
 
     Json(response)
@@ -234,14 +454,12 @@ async fn get_today_workouts(State(state): State<ApiState>) -> Json<TodayWorkouts
     let today_prefix = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     if let Ok(data) = state.garmin_client.fetch_data().await {
-        // Filter done activities
         response.done = data
             .activities
             .into_iter()
             .filter(|a| a.start_time.starts_with(&today_prefix))
             .collect();
 
-        // Filter planned activities
         response.planned = data
             .scheduled_workouts
             .into_iter()

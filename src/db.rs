@@ -1,13 +1,23 @@
 use crate::models::GarminActivity;
 use rusqlite::{params, Connection, Result};
 
+const MAX_CHAT_HISTORY: i64 = 200;
+const MAX_CHAT_MESSAGE_LEN: usize = 4_000;
+
+pub type TrendHistoryItem = (f64, i32, String);
+pub type ProgressionHistoryEntry = (String, f64, i32, String, Vec<TrendHistoryItem>);
+
 pub struct Database {
     conn: Connection,
 }
 
 impl Database {
     pub fn new() -> Result<Self> {
-        let conn = Connection::open("fitness_journal.db")?;
+        // Use the env variable or default to the Docker environment path
+        let db_path = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "sqlite:///app/fitness_journal.db".to_string());
+
+        let conn = Connection::open(db_path.replace("sqlite://", ""))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS exercise_history (
@@ -87,20 +97,34 @@ impl Database {
     pub fn add_ai_chat_message(&self, role: &str, content: &str) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let safe_content: String = content.chars().take(MAX_CHAT_MESSAGE_LEN).collect();
         self.conn.execute(
             "INSERT INTO ai_chats (role, content, created_at) VALUES (?1, ?2, ?3)",
-            params![role, content, now],
+            params![role, safe_content, now],
+        )?;
+        self.conn.execute(
+            "DELETE FROM ai_chats 
+             WHERE id NOT IN (
+                SELECT id FROM ai_chats ORDER BY id DESC LIMIT ?1
+             )",
+            params![MAX_CHAT_HISTORY],
         )?;
         Ok(())
     }
 
     pub fn get_ai_chat_history(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT role, content FROM ai_chats ORDER BY id ASC")?;
-        let mut rows = stmt.query([])?;
+        let mut stmt = self.conn.prepare(
+            "SELECT role, content FROM (
+                SELECT id, role, content
+                FROM ai_chats
+                ORDER BY id DESC
+                LIMIT ?1
+             )
+             ORDER BY id ASC",
+        )?;
+        let mut rows = stmt.query(params![MAX_CHAT_HISTORY])?;
         let mut history = Vec::new();
 
         while let Some(row) = rows.next()? {
@@ -148,9 +172,20 @@ impl Database {
 
     pub fn get_progression_history(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
-            "SELECT exercise_name, MAX(weight), reps, date 
-             FROM exercise_history 
-             GROUP BY exercise_name 
+            "SELECT exercise_name, weight, reps, date
+             FROM (
+                SELECT
+                    exercise_name,
+                    weight,
+                    reps,
+                    date,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY exercise_name
+                        ORDER BY weight DESC, reps DESC, date DESC
+                    ) AS row_rank
+                FROM exercise_history
+             )
+             WHERE row_rank = 1
              ORDER BY exercise_name ASC",
         )?;
 
@@ -172,19 +207,28 @@ impl Database {
         Ok(history)
     }
 
-    pub fn get_progression_history_raw(
-        &self,
-    ) -> Result<Vec<(String, f64, i32, String, Vec<(f64, i32, String)>)>> {
+    pub fn get_progression_history_raw(&self) -> Result<Vec<ProgressionHistoryEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT exercise_name, MAX(weight), reps, date 
-             FROM exercise_history 
-             GROUP BY exercise_name, date 
+            "SELECT exercise_name, weight, reps, date
+             FROM (
+                SELECT
+                    exercise_name,
+                    weight,
+                    reps,
+                    date,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY exercise_name, date
+                        ORDER BY weight DESC, reps DESC, set_index DESC
+                    ) AS row_rank
+                FROM exercise_history
+             )
+             WHERE row_rank = 1
              ORDER BY exercise_name ASC, date ASC",
         )?;
 
         let mut rows = stmt.query(())?;
         use std::collections::BTreeMap;
-        let mut history_map: BTreeMap<String, Vec<(f64, i32, String)>> = BTreeMap::new();
+        let mut history_map: BTreeMap<String, Vec<TrendHistoryItem>> = BTreeMap::new();
 
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
@@ -313,8 +357,8 @@ impl Database {
     pub fn set_garmin_cache(&self, value: &str) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
         self.conn.execute(
             "INSERT INTO kv_store (key, value, updated_at) 
              VALUES ('garmin_cache', ?1, ?2)

@@ -6,6 +6,20 @@ use crate::db::Database;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub const AI_WORKOUT_PREFIX: &str = "FJ-AI:";
+
+pub fn is_ai_managed_workout(name: &str) -> bool {
+    name.starts_with(AI_WORKOUT_PREFIX)
+}
+
+pub fn ensure_ai_workout_name(name: &str) -> String {
+    if is_ai_managed_workout(name) {
+        name.to_string()
+    } else {
+        format!("{AI_WORKOUT_PREFIX}{name}")
+    }
+}
+
 pub struct GarminClient {
     pub api: GarminApi,
     pub db: Arc<Mutex<Database>>,
@@ -49,11 +63,12 @@ impl GarminClient {
             }
         };
 
-        let plans = match self.api.get_training_plans().await {
-            Ok(p) => Some(p),
-            Err(_) => None,
-        }
-        .unwrap_or(serde_json::Value::Null); // we will wrap loosely
+        let plans = self
+            .api
+            .get_training_plans()
+            .await
+            .ok()
+            .unwrap_or(serde_json::Value::Null); // we will wrap loosely
         let plans_vec = if plans.is_array() {
             serde_json::from_value(plans).unwrap_or_default()
         } else {
@@ -64,7 +79,6 @@ impl GarminClient {
         let user_profile: Option<crate::models::GarminProfile> =
             match self.api.get_user_profile().await {
                 Ok(v) => {
-                    println!("RAW USER PROFILE: {}", v);
                     if let Some(dn) = v.get("displayName").and_then(|val| val.as_str()) {
                         display_name = dn.to_string();
                     }
@@ -79,10 +93,7 @@ impl GarminClient {
         let today = chrono::Local::now();
         let today_str = today.format("%Y-%m-%d").to_string();
         let max_metrics = match self.api.get_max_metrics(&today_str).await {
-            Ok(v) => {
-                println!("RAW MAX METRICS: {}", v);
-                serde_json::from_value(v).unwrap_or(None)
-            }
+            Ok(v) => serde_json::from_value(v).unwrap_or(None),
             Err(_) => None,
         };
 
@@ -193,7 +204,6 @@ impl GarminClient {
 
         match self.api.get_training_readiness(&today_str).await {
             Ok(tr_json) => {
-                println!("RAW TRAINING READINESS JSON: {}", tr_json);
                 if let Some(arr) = tr_json.as_array() {
                     if let Some(first) = arr.first() {
                         recovery_metrics.training_readiness = first
@@ -208,7 +218,6 @@ impl GarminClient {
 
         match self.api.get_hrv_status(&today_str).await {
             Ok(hrv_json) => {
-                println!("RAW HRV JSON: {}", hrv_json);
                 if let Some(summary) = hrv_json.get("hrvSummary") {
                     recovery_metrics.hrv_status = summary
                         .get("status")
@@ -227,7 +236,7 @@ impl GarminClient {
             Err(e) => println!("Error fetching HRV JSON: {}", e),
         }
 
-        let seven_days_ago_str = (today - chrono::Duration::try_days(7).unwrap())
+        let seven_days_ago_str = (today - chrono::Duration::days(7))
             .format("%Y-%m-%d")
             .to_string();
 
@@ -237,7 +246,6 @@ impl GarminClient {
             .await
         {
             Ok(rhr_json) => {
-                println!("RAW RHR TREND: {}", rhr_json);
                 if let Some(arr) = rhr_json.as_array() {
                     let mut trend = Vec::new();
                     for item in arr {
@@ -305,12 +313,7 @@ impl GarminClient {
             let mut to_delete = Vec::new();
             for w in arr {
                 if let Some(name) = w.get("workoutName").and_then(|n| n.as_str()) {
-                    if name.starts_with("Strength")
-                        || name.starts_with("Test")
-                        || name.starts_with("Full Body")
-                        || name.starts_with("Upper")
-                        || name.starts_with("Lower")
-                    {
+                    if is_ai_managed_workout(name) {
                         if let Some(wid) = w.get("workoutId").and_then(|i| i.as_i64()) {
                             to_delete.push((wid, name.to_string()));
                         }

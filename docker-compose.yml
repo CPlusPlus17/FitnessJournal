@@ -6,12 +6,13 @@ services:
     container_name: fitness-coach-signal-api
     environment:
       - MODE=json-rpc
+      #- MODE=normal
       #- SIGNAL_CLI_UID=1000 # Optional: Match your user ID
       #- SIGNAL_CLI_GID=1000 # Optional: Match your group ID
     volumes:
       - ./secrets/signal-data:/home/.local/share/signal-cli
     ports:
-      - '8080:8080'
+      - '127.0.0.1:8080:8080'
     restart: unless-stopped
 
   fitness-coach:
@@ -28,4 +29,35 @@ services:
       - ./.env:/app/.env
     # Run the bot daemon by default
     command: [ "--signal", "--daemon" ]
+    restart: unless-stopped
+
+  fitness-api:
+    build: .
+    container_name: fitness-api
+    env_file:
+      - .env
+    volumes:
+      - ./secrets:/app/secrets
+      - ./fitness_journal.db:/app/fitness_journal.db
+      - ./profiles.json:/app/profiles.json
+      - ./.env:/app/.env
+    environment:
+      API_BIND_ADDR: 0.0.0.0:3001
+    ports:
+      - '127.0.0.1:3001:3001'
+    command: [ "--api" ]
+    restart: unless-stopped
+
+  fitness-web:
+    build: ./dashboard
+    container_name: fitness-web
+    env_file:
+      - .env
+    ports:
+      - '3000:3000'
+    environment:
+      # We don't strictly need this unless using SSR fetching to the backend, but good practice
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - fitness-api
     restart: unless-stopped

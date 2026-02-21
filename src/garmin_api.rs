@@ -89,8 +89,8 @@ impl GarminApi {
         if let Some(expires_at) = oauth2.expires_at {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+                .map(|d| d.as_secs())
+                .unwrap_or_default();
             now >= expires_at.saturating_sub(300) // 5 minutes buffer
         } else {
             false // If no expiry tracking, cross fingers
@@ -152,8 +152,8 @@ impl GarminApi {
         let mut new_oauth2: OAuth2Token = res.json().await?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
         new_oauth2.expires_at = Some(now + new_oauth2.expires_in);
         new_oauth2.refresh_token_expires_at = Some(now + new_oauth2.refresh_token_expires_in);
 
@@ -165,6 +165,14 @@ impl GarminApi {
             "secrets/oauth2_token.json",
             serde_json::to_string_pretty(&to_save)?,
         )?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                "secrets/oauth2_token.json",
+                std::fs::Permissions::from_mode(0o600),
+            )?;
+        }
 
         println!("Successfully refreshed Garmin OAuth2 Token natively!");
         Ok(())
