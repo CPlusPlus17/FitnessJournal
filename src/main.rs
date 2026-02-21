@@ -229,7 +229,6 @@ pub async fn run_coach_pipeline(
         progression_history.len()
     );
 
-    // 3. Define Context & Goals
     let mut context = crate::coaching::CoachContext {
         goals: vec![
             "Improve Marathon Time (Sub 4h)".to_string(),
@@ -246,6 +245,20 @@ pub async fn run_coach_pipeline(
             if let Some(active_name) = json.get("active_profile").and_then(|v| v.as_str()) {
                 println!("Loaded active equipment profile: {}", active_name);
                 if let Some(profile) = json.get("profiles").and_then(|p| p.get(active_name)) {
+                    if let Some(goals) = profile.get("goals").and_then(|g| g.as_array()) {
+                        let parsed_goals: Vec<String> = goals
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                        if !parsed_goals.is_empty() {
+                            context.goals = parsed_goals;
+                        } else {
+                            println!(
+                                "Warning: profile '{}' has no valid goals. Falling back to default goals.",
+                                active_name
+                            );
+                        }
+                    }
                     if let Some(constraints) = profile.get("constraints").and_then(|c| c.as_array())
                     {
                         context.constraints = constraints

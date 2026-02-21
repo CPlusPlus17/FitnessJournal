@@ -1,5 +1,7 @@
 # Fitness Journal Coach
 
+> 🚨 **NOT A DEVELOPER?** Check out our **[Dummies Installation Guide](INSTALL_DUMMIES.md)** for a simple, step-by-step way to get set up without any coding knowledge!
+
 This project is an automated fitness coaching assistant. It fetches health and activity data from Garmin Connect, sleep and body battery metrics, and syncs past workouts to a local database. Using a large language model (Gemini 3.1 Pro), it generates weekly workout schedules tailored to your goals and automatically uploads them back to your Garmin calendar.
 
 You interact with the coach via a Signal Messenger bot.
@@ -36,6 +38,11 @@ Clone the repository and set up your core configuration files:
 
    # Optional: comma-separated origins allowed by CORS (defaults to http://localhost:3000)
    CORS_ALLOWED_ORIGINS=http://localhost:3000
+
+   # Optional dashboard admin credentials for /settings and /api/profiles.
+   # Defaults to username=admin and password fallback to FITNESS_API_TOKEN/API_AUTH_TOKEN.
+   DASHBOARD_ADMIN_USERNAME=admin
+   DASHBOARD_ADMIN_PASSWORD=change_me_to_a_second_long_random_value
    ```
 
 2. Log in to Garmin to generate your tokens:
@@ -99,6 +106,7 @@ Use this checklist to publish safely.
 3. Set secure values:
    - `API_AUTH_TOKEN`: long random secret.
    - `FITNESS_API_TOKEN`: same value as `API_AUTH_TOKEN`.
+   - `DASHBOARD_ADMIN_PASSWORD`: dedicated dashboard admin password (or rely on API token fallback).
    - `CORS_ALLOWED_ORIGINS`: only your real frontend origin(s).
    - `API_BIND_ADDR`: keep `127.0.0.1:3001` unless intentionally exposing behind a reverse proxy.
 4. Confirm Garmin token files exist:
@@ -132,6 +140,7 @@ After deployment:
 2. Confirm `FITNESS_DEBUG_PROMPT` is not set in production.
 3. Confirm secrets and DB files are not committed (`.env`, `secrets/*`, `*.db*`).
 4. Confirm API rejects unauthenticated requests when `API_AUTH_TOKEN` is set.
+5. Confirm `/settings` and `/api/profiles` require dashboard admin credentials.
 
 ### 5. Rollback Plan
 
@@ -165,6 +174,7 @@ The application also includes a local dashboard to view upcoming scheduled worko
    The dashboard can authenticate against the backend via:
    - `FITNESS_API_BASE_URL` (default: `http://127.0.0.1:3001`)
    - `FITNESS_API_TOKEN` (should match `API_AUTH_TOKEN` if auth is enabled)
+   - `DASHBOARD_ADMIN_USERNAME` / `DASHBOARD_ADMIN_PASSWORD` for settings/profile editing routes
 
 2. In a separate terminal, start the Next.js frontend:
    ```bash
@@ -173,6 +183,7 @@ The application also includes a local dashboard to view upcoming scheduled worko
    npm run dev
    ```
 3. Open `http://localhost:3000` in your browser.
+4. Open `/settings` and authenticate with dashboard admin credentials when prompted.
 
 ## Special Thanks
 

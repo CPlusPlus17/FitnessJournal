@@ -8,6 +8,7 @@ const ALLOWED_PATHS = new Set([
   'muscle_heatmap',
   'chat',
   'generate',
+  'profiles',
 ]);
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,7 @@ function backendApiBaseUrl(): string {
 
 async function forwardRequest(
   request: NextRequest,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT',
   pathSegments: string[],
 ): Promise<NextResponse> {
   const path = pathSegments.join('/');
@@ -42,7 +43,7 @@ async function forwardRequest(
   }
 
   let body: string | undefined;
-  if (method === 'POST') {
+  if (method === 'POST' || method === 'PUT') {
     const rawBody = await request.text();
     if (rawBody) {
       body = rawBody;
@@ -95,4 +96,12 @@ export async function POST(
 ): Promise<NextResponse> {
   const { path } = await context.params;
   return forwardRequest(request, 'POST', path || []);
+}
+
+export async function PUT(
+  request: NextRequest,
+  context: { params: Promise<RouteParams> },
+): Promise<NextResponse> {
+  const { path } = await context.params;
+  return forwardRequest(request, 'PUT', path || []);
 }

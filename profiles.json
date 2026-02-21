@@ -1,47 +1,60 @@
 {
-    "active_profile": "home_gym",
-    "profiles": {
-        "home_gym": {
-            "constraints": [
-                "Run: Availability 7 days/week (Follow Garmin Coach prescriptions)",
-                "Strength: 3x week (Hypertrophy/Maintenance)",
-                "Recovery: Listen to Body Battery",
-                "Time Limit: Keep strength workouts under 45 minutes total duration.",
-                "Progression: Reference 'Recent Bests'. If successful, apply progressive overload by increasing weight by the smallest available increment (e.g. 2.5kg) or reps by 1-2. Do not jump quickly.",
-                "Leg Day Protection: If a Tempo, Interval, or Long Run is scheduled for tomorrow, you MUST avoid heavy lower-body compound lifts (Squats, Deadlifts, Lunges) in today's strength session to ensure leg freshness."
-            ],
-            "available_equipment": [
-                "Dumbbells (Fixed Pairs): 2.5kg, 5kg, 7.5kg, 10kg",
-                "Dumbbells (Adjustable Pair): 4kg, 8kg, 12kg, 16kg, 20kg, 24kg",
-                "Kettlebell: 12kg",
-                "Pull-up Rod",
-                "Weight Bench",
-                "Sit-up Cushion",
-                "Rowing Machine",
-                "Skipping Rope"
-            ]
-        },
-        "travel_hotel": {
-            "constraints": [
-                "Strength: Short, 30-minute hyper-focused sessions",
-                "Progression: Emphasize high-rep AMRAP sets since weight is limited.",
-                "Leg Day: Use Bodyweight Plyometrics and high volume goblet squats if heavy dumbbells aren't present."
-            ],
-            "available_equipment": [
-                "Dumbbells (Pairs): 2kg to 20kg",
-                "Adjustable Bench",
-                "Treadmill"
-            ]
-        },
-        "bodyweight_only": {
-            "constraints": [
-                "Strength: Circuit style, minimal rest to maximize cardiovascular benefit.",
-                "Progression: Focus on varied tempos (e.g., slow eccentrics) and increased total reps."
-            ],
-            "available_equipment": [
-                "Bodyweight only",
-                "Yoga Mat"
-            ]
-        }
+  "active_profile": "home_gym",
+  "profiles": {
+    "bodyweight_only": {
+      "goals": [
+        "Maintain functional fitness",
+        "Increase bodyweight strength"
+      ],
+      "constraints": [
+        "Strength: Circuit style, minimal rest to maximize cardiovascular benefit.",
+        "Progression: Focus on varied tempos (e.g., slow eccentrics) and increased total reps."
+      ],
+      "available_equipment": [
+        "Bodyweight only",
+        "Yoga Mat"
+      ]
+    },
+    "home_gym": {
+      "goals": [
+        "Improve Marathon Time (Sub 4h)",
+        "Maintain Upper Body Strength (Hypertrophy)",
+        "Increase VO2Max"
+      ],
+      "constraints": [
+        "Run: Availability 7 days/week (Follow Garmin Coach prescriptions)",
+        "Strength: 3x week (Hypertrophy/Maintenance)",
+        "Recovery: Listen to Body Battery",
+        "Time Limit: Keep strength workouts under 45 minutes total duration.",
+        "Progression: Reference 'Recent Bests'. If successful, apply progressive overload by increasing weight by the smallest available increment (e.g. 2.5kg) or reps by 1-2. Do not jump quickly.",
+        "Leg Day Protection: If a Tempo, Interval, or Long Run is scheduled for tomorrow, you MUST avoid heavy lower-body compound lifts (Squats, Deadlifts, Lunges) in today's strength session to ensure leg freshness."
+      ],
+      "available_equipment": [
+        "Dumbbells (Fixed Pairs): 2.5kg, 5kg, 7.5kg, 10kg",
+        "Dumbbells (Adjustable Pair): 4kg, 8kg, 12kg, 16kg, 20kg, 24kg",
+        "Kettlebell: 12kg",
+        "Pull-up Rod",
+        "Weight Bench",
+        "Sit-up Cushion",
+        "Rowing Machine",
+        "Skipping Rope"
+      ]
+    },
+    "travel_hotel": {
+      "goals": [
+        "Maintain current fitness levels",
+        "Focus on mobility and recovery"
+      ],
+      "constraints": [
+        "Strength: Short, 30-minute hyper-focused sessions",
+        "Progression: Emphasize high-rep AMRAP sets since weight is limited.",
+        "Leg Day: Use Bodyweight Plyometrics and high volume goblet squats if heavy dumbbells aren't present."
+      ],
+      "available_equipment": [
+        "Dumbbells (Pairs): 2kg to 20kg",
+        "Adjustable Bench",
+        "Treadmill"
+      ]
     }
+  }
 }

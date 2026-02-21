@@ -1,5 +1,5 @@
 use axum::{
-    extract::{DefaultBodyLimit, Request, State},
+    extract::{rejection::JsonRejection, DefaultBodyLimit, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -8,8 +8,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     net::SocketAddr,
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -21,6 +22,10 @@ use crate::db::Database;
 use crate::garmin_client::GarminClient;
 
 const MAX_CHAT_INPUT_LEN: usize = 4_000;
+const MAX_PROFILE_NAME_LEN: usize = 64;
+const MAX_PROFILE_ITEMS: usize = 64;
+const MAX_PROFILE_ITEM_LEN: usize = 256;
+const PROFILES_PATH: &str = "profiles.json";
 
 #[derive(Serialize)]
 pub struct ChatMessage {
@@ -31,6 +36,25 @@ pub struct ChatMessage {
 #[derive(Deserialize)]
 pub struct ChatInput {
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfileConfigPayload {
+    #[serde(default)]
+    goals: Vec<String>,
+    #[serde(default)]
+    constraints: Vec<String>,
+    #[serde(default)]
+    available_equipment: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfilesPayload {
+    active_profile: String,
+    #[serde(default)]
+    profiles: BTreeMap<String, ProfileConfigPayload>,
 }
 
 #[derive(Debug)]
@@ -161,6 +185,132 @@ fn has_valid_api_token(headers: &HeaderMap, expected: &str) -> bool {
     false
 }
 
+fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        status,
+        Json(serde_json::json!({
+            "status": "error",
+            "message": message
+        })),
+    )
+}
+
+fn normalize_profile_list(
+    values: &[String],
+    profile_name: &str,
+    field_name: &str,
+) -> Result<Vec<String>, String> {
+    if values.len() > MAX_PROFILE_ITEMS {
+        return Err(format!(
+            "Profile '{}' has too many '{}' entries (max {}).",
+            profile_name, field_name, MAX_PROFILE_ITEMS
+        ));
+    }
+
+    let mut normalized = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.chars().count() > MAX_PROFILE_ITEM_LEN {
+            return Err(format!(
+                "Profile '{}' has an entry in '{}' that exceeds {} characters.",
+                profile_name, field_name, MAX_PROFILE_ITEM_LEN
+            ));
+        }
+
+        normalized.push(trimmed.to_string());
+    }
+
+    Ok(normalized)
+}
+
+fn validate_profiles_payload(payload: ProfilesPayload) -> Result<ProfilesPayload, String> {
+    let active_profile = payload.active_profile.trim();
+    if active_profile.is_empty() {
+        return Err("active_profile cannot be empty.".to_string());
+    }
+    if active_profile.chars().count() > MAX_PROFILE_NAME_LEN {
+        return Err(format!(
+            "active_profile exceeds {} characters.",
+            MAX_PROFILE_NAME_LEN
+        ));
+    }
+    if payload.profiles.is_empty() {
+        return Err("profiles must include at least one profile.".to_string());
+    }
+
+    let mut normalized_profiles = BTreeMap::new();
+    for (raw_name, profile) in payload.profiles {
+        let profile_name = raw_name.trim();
+        if profile_name.is_empty() {
+            return Err("Profile names cannot be empty.".to_string());
+        }
+        if profile_name.chars().count() > MAX_PROFILE_NAME_LEN {
+            return Err(format!(
+                "Profile name '{}' exceeds {} characters.",
+                profile_name, MAX_PROFILE_NAME_LEN
+            ));
+        }
+        if normalized_profiles.contains_key(profile_name) {
+            return Err(format!("Duplicate profile name '{}'.", profile_name));
+        }
+
+        let normalized_profile = ProfileConfigPayload {
+            goals: normalize_profile_list(&profile.goals, profile_name, "goals")?,
+            constraints: normalize_profile_list(&profile.constraints, profile_name, "constraints")?,
+            available_equipment: normalize_profile_list(
+                &profile.available_equipment,
+                profile_name,
+                "available_equipment",
+            )?,
+        };
+
+        normalized_profiles.insert(profile_name.to_string(), normalized_profile);
+    }
+
+    if !normalized_profiles.contains_key(active_profile) {
+        return Err(format!(
+            "active_profile '{}' must reference an existing profile.",
+            active_profile
+        ));
+    }
+
+    Ok(ProfilesPayload {
+        active_profile: active_profile.to_string(),
+        profiles: normalized_profiles,
+    })
+}
+
+fn write_file_atomically(path: &Path, content: &str) -> std::io::Result<()> {
+    let mut tmp_path = path.to_path_buf();
+    tmp_path.set_extension("json.tmp");
+
+    std::fs::write(&tmp_path, content)?;
+    if let Err(err) = std::fs::rename(&tmp_path, path) {
+        // Docker file bind mounts can reject atomic replace with EBUSY/EXDEV.
+        // In that case we fall back to direct write to preserve functionality.
+        let needs_fallback = matches!(err.raw_os_error(), Some(16 | 18));
+        if needs_fallback {
+            eprintln!(
+                "Atomic replace failed for {} ({}). Falling back to direct write.",
+                path.display(),
+                err
+            );
+            std::fs::write(path, content)?;
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(());
+        }
+
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
+    Ok(())
+}
+
 async fn auth_middleware(State(state): State<ApiState>, request: Request, next: Next) -> Response {
     if request.method() == Method::OPTIONS {
         return next.run(request).await;
@@ -209,7 +359,7 @@ pub async fn run_server(
 
     let cors = CorsLayer::new()
         .allow_origin(cors_origins())
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
@@ -224,6 +374,7 @@ pub async fn run_server(
         .route("/api/generate", axum::routing::post(trigger_generate))
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
+        .route("/api/profiles", get(get_profiles).put(update_profiles))
         .with_state(state.clone())
         .layer(DefaultBodyLimit::max(16 * 1024))
         .layer(middleware::from_fn_with_state(state, auth_middleware))
@@ -486,4 +637,66 @@ async fn get_upcoming_workouts(
 
     planned.sort_by(|a, b| a.date.cmp(&b.date));
     Json(planned)
+}
+
+async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde_json::Value>)> {
+    let data = std::fs::read_to_string(PROFILES_PATH).map_err(|err| {
+        eprintln!("Failed to read {}: {}", PROFILES_PATH, err);
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Profiles configuration is unavailable.",
+        )
+    })?;
+
+    let parsed = serde_json::from_str::<ProfilesPayload>(&data).map_err(|err| {
+        eprintln!("Failed to parse {}: {}", PROFILES_PATH, err);
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Profiles configuration is invalid.",
+        )
+    })?;
+
+    let validated = validate_profiles_payload(parsed).map_err(|err| {
+        eprintln!("Validation failed for {}: {}", PROFILES_PATH, err);
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Profiles configuration is invalid.",
+        )
+    })?;
+
+    Ok(Json(validated))
+}
+
+async fn update_profiles(
+    payload: Result<Json<ProfilesPayload>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let Json(payload) = payload.map_err(|err| {
+        eprintln!("Rejected invalid profiles payload: {}", err);
+        error_response(StatusCode::BAD_REQUEST, "Invalid profiles payload.")
+    })?;
+
+    let validated = validate_profiles_payload(payload)
+        .map_err(|err| error_response(StatusCode::BAD_REQUEST, &err))?;
+
+    let mut json_str = serde_json::to_string_pretty(&validated).map_err(|err| {
+        eprintln!("Failed to serialize {} payload: {}", PROFILES_PATH, err);
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist profiles configuration.",
+        )
+    })?;
+    json_str.push('\n');
+
+    write_file_atomically(Path::new(PROFILES_PATH), &json_str).map_err(|err| {
+        eprintln!("Failed to atomically write {}: {}", PROFILES_PATH, err);
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist profiles configuration.",
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "message": "Profiles updated"
+    })))
 }
