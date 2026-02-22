@@ -92,6 +92,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(res) => println!("Success! Workout ID: {:?}", res.get("workoutId")),
                 Err(e) => println!("Failed to create workout: {}", e),
             }
+        }
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--test-fetch") {
+        if let Some(workout_id) = args.get(pos + 1) {
+            println!("Fetching workout ID '{}' from Garmin...", workout_id);
+            let endpoint = format!("/workout-service/workout/{}", workout_id);
+            match garmin_client.api.connectapi_get(&endpoint).await {
+                Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
+                Err(e) => println!("Failed: {}", e),
+            }
             return Ok(());
         }
     }
@@ -395,10 +406,13 @@ pub async fn run_coach_pipeline(
                                 .await
                             {
                                 Ok(res) => {
+                                    println!("Garmin create response: {}", res);
                                     if let Some(id) = res.get("workoutId").and_then(|i| i.as_i64())
                                     {
                                         workout_id = Some(id);
                                         println!("Success! Workout ID: {}", id);
+                                    } else {
+                                        println!("Warning: workoutId not found in response.");
                                     }
                                 }
                                 Err(e) => {
@@ -412,6 +426,7 @@ pub async fn run_coach_pipeline(
                                             .await
                                         {
                                             Ok(res) => {
+                                                println!("Garmin generic create response: {}", res);
                                                 if let Some(id) =
                                                     res.get("workoutId").and_then(|i| i.as_i64())
                                                 {
@@ -420,6 +435,8 @@ pub async fn run_coach_pipeline(
                                                         "Success! (Generic Mode) Workout ID: {}",
                                                         id
                                                     );
+                                                } else {
+                                                    println!("Warning: workoutId not found in generic response.");
                                                 }
                                             }
                                             Err(e2) => println!(
@@ -450,6 +467,7 @@ pub async fn run_coach_pipeline(
                                 }
                             }
                         }
+                        let _ = database.lock().await.clear_garmin_cache();
                     }
                     Err(e) => {
                         eprintln!("Could not extract JSON from AI response: {}", e);

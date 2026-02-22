@@ -219,12 +219,16 @@ impl GarminApi {
             return Err(anyhow!("Garmin API POST returned {}: {}", status, text));
         }
 
-        // POST /workout-service/schedule/{id} might return 204 No Content
-        if res.status() == 204 || res.content_length().unwrap_or(0) == 0 {
+        if res.status() == 204 || res.content_length() == Some(0) {
             return Ok(serde_json::json!({}));
         }
 
-        let json: serde_json::Value = res.json().await?;
+        let body_text = res.text().await?;
+        if body_text.trim().is_empty() {
+            return Ok(serde_json::json!({}));
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&body_text)?;
         Ok(json)
     }
 

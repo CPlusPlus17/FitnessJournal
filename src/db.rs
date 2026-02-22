@@ -369,4 +369,9 @@ impl Database {
         )?;
         Ok(())
     }
+
+    pub fn clear_garmin_cache(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM kv_store WHERE key = 'garmin_cache'", [])?;
+        Ok(())
+    }
 }

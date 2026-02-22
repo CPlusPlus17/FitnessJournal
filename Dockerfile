@@ -31,6 +31,9 @@ RUN apt-get update && apt-get install -y \
 # Copy rust binary from builder
 COPY --from=builder /app/target/release/fitness_journal /app/fitness_journal
 
+# Copy exercise database
+COPY ["Garmin Exercises Database - Exercises.csv", "/app/"]
+
 # Set execute permissions
 RUN chmod +x /app/fitness_journal
 
