@@ -4,9 +4,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GeminiRequest {
     system_instruction: Option<SystemInstruction>,
     contents: Vec<Content>,
+    generation_config: Option<GenerationConfig>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerationConfig {
+    max_output_tokens: i32,
 }
 
 #[derive(Serialize)]
@@ -73,6 +81,9 @@ impl AiClient {
                     text: prompt.to_string(),
                 }],
             }],
+            generation_config: Some(GenerationConfig {
+                max_output_tokens: 8192,
+            }),
         };
 
         let url = format!(
@@ -128,6 +139,9 @@ impl AiClient {
                 parts: vec![Part { text: "You are an elite Multi-Sport Coach. Follow instructions precisely. The user may ask questions about the generated workout plan, or fitness. You will respond as the coach.".to_string() }]
             }),
             contents,
+            generation_config: Some(GenerationConfig {
+                max_output_tokens: 8192,
+            }),
         };
 
         let url = format!(
