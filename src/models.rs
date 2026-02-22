@@ -124,8 +124,8 @@ pub struct GarminActivity {
     pub id: Option<i64>,
     #[serde(alias = "activityName")]
     pub name: Option<String>,
-    #[serde(rename = "type")]
-    pub activity_type: Option<String>,
+    #[serde(alias = "activityType", rename = "type")]
+    pub activity_type: Option<serde_json::Value>,
     #[serde(rename = "startTimeLocal")]
     pub start_time: String,
     pub distance: Option<f64>,
@@ -136,6 +136,20 @@ pub struct GarminActivity {
     pub max_hr: Option<f64>,
     pub sets: Option<GarminSetsData>,
 }
+
+impl GarminActivity {
+    pub fn get_activity_type(&self) -> Option<&str> {
+        if let Some(ref val) = self.activity_type {
+            if let Some(tk) = val.get("typeKey").and_then(|v| v.as_str()) {
+                return Some(tk);
+            } else if let Some(s) = val.as_str() {
+                return Some(s);
+            }
+        }
+        None
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]

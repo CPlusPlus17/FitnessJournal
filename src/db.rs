@@ -2,7 +2,7 @@ use crate::models::GarminActivity;
 use rusqlite::{params, Connection, Result};
 
 const MAX_CHAT_HISTORY: i64 = 200;
-const MAX_CHAT_MESSAGE_LEN: usize = 4_000;
+const MAX_CHAT_MESSAGE_LEN: usize = 65_536;
 
 pub type TrendHistoryItem = (f64, i32, String);
 pub type ProgressionHistoryEntry = (String, f64, i32, String, Vec<TrendHistoryItem>);

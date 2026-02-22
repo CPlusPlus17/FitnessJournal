@@ -24,14 +24,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Database::new().expect("Failed to initialize SQLite database"),
     ));
 
-    // Initialize components
-    let garmin_client = Arc::new(GarminClient::new(database.clone()));
     let coach = Arc::new(Coach::new());
 
     let args: Vec<String> = std::env::args().collect();
     let is_daemon = args.len() > 1 && args.contains(&"--daemon".to_string());
     let is_signal = args.len() > 1 && args.contains(&"--signal".to_string());
     let is_api = args.len() > 1 && args.contains(&"--api".to_string());
+
+    if args.contains(&"--login".to_string()) {
+        use std::io::{self, Write};
+
+        print!("Garmin Email: ");
+        io::stdout().flush()?;
+        let mut email = String::new();
+        io::stdin().read_line(&mut email)?;
+        let email = email.trim();
+
+        let password = rpassword::prompt_password("Garmin Password: ")?;
+
+        println!("Logging into Garmin Connect...");
+        match crate::garmin_login::login_step_1(email, &password).await {
+            Ok(crate::garmin_login::LoginResult::Success(o1, o2)) => {
+                println!("Login successful!");
+                write_secret_json_file("secrets/oauth1_token.json", &o1)?;
+                write_secret_json_file("secrets/oauth2_token.json", &o2)?;
+                println!(
+                    "Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json"
+                );
+            }
+            Ok(crate::garmin_login::LoginResult::MfaRequired(session)) => {
+                print!("Garmin MFA Code (Enter to submit): ");
+                io::stdout().flush()?;
+                let mut mfa_code = String::new();
+                io::stdin().read_line(&mut mfa_code)?;
+                let mfa_code = mfa_code.trim();
+
+                println!("Submitting MFA code...");
+                match crate::garmin_login::login_step_2_mfa(session, mfa_code).await {
+                    Ok((o1, o2)) => {
+                        println!("MFA successful!");
+                        write_secret_json_file("secrets/oauth1_token.json", &o1)?;
+                        write_secret_json_file("secrets/oauth2_token.json", &o2)?;
+                        println!("Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json");
+                    }
+                    Err(e) => println!("MFA login failed: {}", e),
+                }
+            }
+            Err(e) => println!("Login failed: {}", e),
+        }
+        return Ok(());
+    }
+
+    let garmin_client = Arc::new(GarminClient::new(database.clone()));
 
     if let Some(pos) = args.iter().position(|a| a == "--test-upload") {
         if let Some(file) = args.get(pos + 1) {
@@ -96,50 +140,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if args.contains(&"--login".to_string()) {
-        use std::io::{self, Write};
-
-        print!("Garmin Email: ");
-        io::stdout().flush()?;
-        let mut email = String::new();
-        io::stdin().read_line(&mut email)?;
-        let email = email.trim();
-
-        let password = rpassword::prompt_password("Garmin Password: ")?;
-
-        println!("Logging into Garmin Connect...");
-        match crate::garmin_login::login_step_1(email, &password).await {
-            Ok(crate::garmin_login::LoginResult::Success(o1, o2)) => {
-                println!("Login successful!");
-                write_secret_json_file("secrets/oauth1_token.json", &o1)?;
-                write_secret_json_file("secrets/oauth2_token.json", &o2)?;
-                println!(
-                    "Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json"
-                );
-            }
-            Ok(crate::garmin_login::LoginResult::MfaRequired(session)) => {
-                print!("Garmin MFA Code (Enter to submit): ");
-                io::stdout().flush()?;
-                let mut mfa_code = String::new();
-                io::stdin().read_line(&mut mfa_code)?;
-                let mfa_code = mfa_code.trim();
-
-                println!("Submitting MFA code...");
-                match crate::garmin_login::login_step_2_mfa(session, mfa_code).await {
-                    Ok((o1, o2)) => {
-                        println!("MFA successful!");
-                        write_secret_json_file("secrets/oauth1_token.json", &o1)?;
-                        write_secret_json_file("secrets/oauth2_token.json", &o2)?;
-                        println!("Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json");
-                    }
-                    Err(e) => println!("MFA login failed: {}", e),
-                }
-            }
-            Err(e) => println!("Login failed: {}", e),
-        }
-        return Ok(());
-    }
-
     if is_api {
         println!("Starting Fitness Coach in API mode.");
         if let Err(e) =
@@ -152,8 +152,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_signal {
         let bot = bot::BotController::new(garmin_client.clone(), coach.clone(), database.clone());
-        bot.run().await;
-        return Ok(());
+        if is_daemon {
+            tokio::spawn(async move {
+                bot.run().await;
+            });
+        } else {
+            bot.run().await;
+            return Ok(());
+        }
     }
 
     if is_daemon {

@@ -21,7 +21,7 @@ use crate::coaching::Coach;
 use crate::db::Database;
 use crate::garmin_client::GarminClient;
 
-const MAX_CHAT_INPUT_LEN: usize = 4_000;
+const MAX_CHAT_INPUT_LEN: usize = 65_536;
 const MAX_PROFILE_NAME_LEN: usize = 64;
 const MAX_PROFILE_ITEMS: usize = 64;
 const MAX_PROFILE_ITEM_LEN: usize = 256;

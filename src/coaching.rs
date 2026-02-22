@@ -44,8 +44,7 @@ impl Coach {
             .iter()
             .filter(|a| {
                 let s = a
-                    .activity_type
-                    .as_deref()
+                    .get_activity_type()
                     .unwrap_or("unknown")
                     .to_lowercase();
                 s.contains("cycling") || s.contains("biking")
@@ -55,8 +54,7 @@ impl Coach {
         let run_count = recent_activities
             .iter()
             .filter(|a| {
-                a.activity_type
-                    .as_deref()
+                a.get_activity_type()
                     .unwrap_or("unknown")
                     .to_lowercase()
                     .contains("running")
@@ -67,8 +65,7 @@ impl Coach {
             .iter()
             .filter(|a| {
                 let s = a
-                    .activity_type
-                    .as_deref()
+                    .get_activity_type()
                     .unwrap_or("unknown")
                     .to_lowercase();
                 s.contains("strength") || s.contains("fitness")
@@ -406,8 +403,7 @@ impl Coach {
         let run_count = recent_30d
             .iter()
             .filter(|a| {
-                a.activity_type
-                    .as_deref()
+                a.get_activity_type()
                     .unwrap_or("unknown")
                     .to_lowercase()
                     .contains("run")
@@ -417,8 +413,7 @@ impl Coach {
             .iter()
             .filter(|a| {
                 let s = a
-                    .activity_type
-                    .as_deref()
+                    .get_activity_type()
                     .unwrap_or("unknown")
                     .to_lowercase();
                 s.contains("bike") || s.contains("cycl")
@@ -427,13 +422,11 @@ impl Coach {
         let strength_count = recent_30d
             .iter()
             .filter(|a| {
-                a.activity_type
-                    .as_deref()
+                a.get_activity_type()
                     .unwrap_or("unknown")
                     .to_lowercase()
                     .contains("strength")
-                    || a.activity_type
-                        .as_deref()
+                    || a.get_activity_type()
                         .unwrap_or("unknown")
                         .to_lowercase()
                         .contains("fitness")

@@ -283,7 +283,16 @@ impl GarminClient {
         }
 
         let mut final_activities = Vec::new();
-        for act in activities {
+        for mut act in activities {
+            let is_strength = act.get_activity_type() == Some("strength_training");
+
+            if is_strength {
+                if let Some(id) = act.id {
+                    if let Ok(Some(sets)) = self.api.get_activity_exercise_sets(id).await {
+                        act.sets = Some(sets);
+                    }
+                }
+            }
             final_activities.push(act);
         }
 
