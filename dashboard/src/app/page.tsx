@@ -16,19 +16,20 @@ type ProgressionItem = {
 
 type CompletedWorkout = {
   name?: string;
-  type?: any;
-  activity_type?: any;
-  sport?: any;
+  type?: unknown;
+  activity_type?: unknown;
+  sport?: unknown;
   duration?: number;
   distance?: number;
   averageHR?: number;
 };
 
-const extractType = (val: any): string => {
+const extractType = (val: unknown): string => {
   if (!val) return "";
   if (typeof val === 'string') return val;
-  if (typeof val === 'object') {
-    return val.typeKey || val.type || val.name || "activity";
+  if (typeof val === 'object' && val !== null) {
+    const obj = val as Record<string, unknown>;
+    return String(obj.typeKey || obj.type || obj.name || "activity");
   }
   return String(val);
 };

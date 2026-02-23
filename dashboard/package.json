@@ -10,9 +10,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@mjcdev/react-body-highlighter": "^0.0.4",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-body-highlighter": "^2.0.5",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0"
   },

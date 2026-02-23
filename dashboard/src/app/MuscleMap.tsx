@@ -1,13 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Model from 'react-body-highlighter';
-
-import type { IExerciseData, Muscle } from 'react-body-highlighter/dist/component/metadata';
+import Body, { ExtendedBodyPart } from '@mjcdev/react-body-highlighter';
 
 type MuscleMapItem = {
     name: string;
-    muscles: Muscle[];
+    muscles: string[];
     frequency: number;
 };
 
@@ -29,6 +27,7 @@ const FATIGUE_COLORS = [
 export default function MuscleMap() {
     const [data, setData] = useState<MuscleMapItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [gender, setGender] = useState<'male' | 'female'>('male');
 
     useEffect(() => {
         async function fetchData() {
@@ -55,41 +54,80 @@ export default function MuscleMap() {
         );
     }
 
-    // The Model component expects data in the format of IExerciseData objects
-    // where each object has { name: string, muscles: string[], frequency?: number }
-    // Our backend happens to return exactly this format, but as custom types. We will coerce it.
+    // Map old muscle names to the new package's accepted slugs
+    const slugMap: Record<string, string> = {
+        'front-deltoids': 'deltoids',
+        'back-deltoids': 'deltoids',
+        'adductor': 'adductors',
+        'abductors': 'adductors',
+    };
+
+    // Aggregate frequencies per muscle
+    const muscleFrequencies: Record<string, number> = {};
+    data.forEach(item => {
+        const freq = item.frequency || 1;
+        item.muscles.forEach(muscle => {
+            const mappedSlug = slugMap[muscle] || muscle;
+            muscleFrequencies[mappedSlug] = (muscleFrequencies[mappedSlug] || 0) + freq;
+        });
+    });
+
+    const bodyParts: ExtendedBodyPart[] = Object.entries(muscleFrequencies).map(([slug, freq]) => {
+        // Find correct mapping to intensity (1 to 10 for FATIGUE_COLORS array length 10)
+        const intensityStr = Math.min(Math.max(1, freq), 10);
+        return {
+            slug: slug as ExtendedBodyPart['slug'],
+            intensity: intensityStr
+        };
+    });
 
     return (
         <div className="glass-panel p-6">
-            <h3 className="text-xl font-bold tracking-tight mb-2">Muscle Fatigue Heatmap</h3>
-            <p className="text-gray-400 text-sm mb-8">
-                Visualizing active working sets over the last 14 days. Yellow indicates low fatigue, deep red indicates high fatigue.
-            </p>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+                <div>
+                    <h3 className="text-xl font-bold tracking-tight mb-2">Muscle Fatigue Heatmap</h3>
+                    <p className="text-gray-400 text-sm">
+                        Visualizing active working sets over the last 14 days. Yellow indicates low fatigue, deep red indicates high fatigue.
+                    </p>
+                </div>
+                <div className="mt-4 md:mt-0 flex bg-gray-800/50 p-1 rounded-lg border border-white/10">
+                    <button
+                        onClick={() => setGender('male')}
+                        className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${gender === 'male' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-gray-400 hover:text-gray-300'}`}
+                    >
+                        Male
+                    </button>
+                    <button
+                        onClick={() => setGender('female')}
+                        className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${gender === 'female' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-gray-400 hover:text-gray-300'}`}
+                    >
+                        Female
+                    </button>
+                </div>
+            </div>
 
             {/* 
         The component svgStyle handles making it fit into the design.
         We provide a dark body color to match the dashboard's aesthetic.
       */}
             <div className="flex flex-col md:flex-row items-center justify-center gap-12 w-full">
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center w-full max-w-[250px]">
                     <h4 className="text-sm font-medium text-gray-400 mb-4 tracking-wider uppercase">Anterior (Front)</h4>
-                    <Model
-                        data={data as IExerciseData[]}
-                        type="anterior"
-                        bodyColor="#1f2937"
-                        highlightedColors={FATIGUE_COLORS}
-                        style={{ width: "100%", maxWidth: "250px" }}
+                    <Body
+                        data={bodyParts}
+                        side="front"
+                        gender={gender}
+                        colors={FATIGUE_COLORS}
                     />
                 </div>
 
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center w-full max-w-[250px]">
                     <h4 className="text-sm font-medium text-gray-400 mb-4 tracking-wider uppercase">Posterior (Back)</h4>
-                    <Model
-                        data={data as IExerciseData[]}
-                        type="posterior"
-                        bodyColor="#1f2937"
-                        highlightedColors={FATIGUE_COLORS}
-                        style={{ width: "100%", maxWidth: "250px" }}
+                    <Body
+                        data={bodyParts}
+                        side="back"
+                        gender={gender}
+                        colors={FATIGUE_COLORS}
                     />
                 </div>
             </div>
