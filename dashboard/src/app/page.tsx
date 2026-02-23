@@ -16,12 +16,21 @@ type ProgressionItem = {
 
 type CompletedWorkout = {
   name?: string;
-  type?: string;
-  activity_type?: string;
-  sport?: string;
+  type?: any;
+  activity_type?: any;
+  sport?: any;
   duration?: number;
   distance?: number;
   averageHR?: number;
+};
+
+const extractType = (val: any): string => {
+  if (!val) return "";
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object') {
+    return val.typeKey || val.type || val.name || "activity";
+  }
+  return String(val);
 };
 
 type PlannedWorkout = {
@@ -201,12 +210,12 @@ export default async function Dashboard() {
 
   // Helper to check if a planned workout is already completed today
   const isWorkoutDone = (planned: PlannedWorkout) => {
-    const pTitle = (planned.title || planned.name || "").toLowerCase();
-    const pSport = (planned.sport || planned.type || "").toLowerCase().replace(/_|\s/g, '');
+    const pTitle = extractType(planned.title || planned.name).toLowerCase();
+    const pSport = extractType(planned.sport || planned.type).toLowerCase().replace(/_|\s/g, '');
 
     return todayWorkouts.done.some((done: CompletedWorkout) => {
-      const dName = (done.name || "").toLowerCase();
-      const dType = (done.type || done.activity_type || done.sport || "").toLowerCase().replace(/_|\s/g, '');
+      const dName = extractType(done.name).toLowerCase();
+      const dType = extractType(done.type || done.activity_type || done.sport).toLowerCase().replace(/_|\s/g, '');
 
       // Match by title/name (e.g., "Jegenstorf - Base" includes "Base")
       if (pTitle && dName && (dName.includes(pTitle) || pTitle.includes(dName))) {
@@ -438,7 +447,7 @@ export default async function Dashboard() {
                 <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 <div className="flex justify-between items-start mb-2">
                   <h4 className="text-white font-medium">{workout.name}</h4>
-                  <span className="text-xs px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded-full">{workout.type || "Activity"}</span>
+                  <span className="text-xs px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded-full">{extractType(workout.type || workout.activity_type) || "Activity"}</span>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
                   {workout.duration && (
