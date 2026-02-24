@@ -57,13 +57,15 @@ struct ContentResponse {
 pub struct AiClient {
     client: Client,
     api_key: String,
+    model: String,
 }
 
 impl AiClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String, model: String) -> Self {
         AiClient {
             client: Client::new(),
             api_key,
+            model,
         }
     }
 
@@ -87,7 +89,8 @@ impl AiClient {
         };
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key={}",
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.model,
             self.api_key
         );
 
@@ -145,7 +148,8 @@ impl AiClient {
         };
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key={}",
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.model,
             self.api_key
         );
 

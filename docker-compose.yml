@@ -24,9 +24,12 @@ services:
       - signal-api
     volumes:
       - ./secrets:/app/secrets
-      - ./fitness_journal.db:/app/fitness_journal.db
+      - ./data:/app/data
       - ./profiles.json:/app/profiles.json
       - ./.env:/app/.env
+    environment:
+      DATABASE_URL: "sqlite:///app/data/fitness_journal.db"
+      PROFILES_PATH: "/app/data/profiles.json"
     # Run the bot daemon by default
     command: [ "--signal", "--daemon" ]
     restart: unless-stopped
@@ -38,10 +41,12 @@ services:
       - .env
     volumes:
       - ./secrets:/app/secrets
-      - ./fitness_journal.db:/app/fitness_journal.db
+      - ./data:/app/data
       - ./profiles.json:/app/profiles.json
       - ./.env:/app/.env
     environment:
+      DATABASE_URL: "sqlite:///app/data/fitness_journal.db"
+      PROFILES_PATH: "/app/data/profiles.json"
       API_BIND_ADDR: 0.0.0.0:3001
     ports:
       - '127.0.0.1:3001:3001'
