@@ -37,6 +37,9 @@ COPY ["Garmin Exercises Database - Exercises.csv", "/app/"]
 # Set execute permissions
 RUN chmod +x /app/fitness_journal
 
+# Create data directory for the SQLite database
+RUN mkdir -p /app/data
+
 # Define the entrypoint to the compiled binary
 # Pass any necessary flags like --daemon or --signal via docker-compose command
 ENTRYPOINT ["/app/fitness_journal"]

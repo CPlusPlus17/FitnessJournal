@@ -25,7 +25,9 @@ const MAX_CHAT_INPUT_LEN: usize = 65_536;
 const MAX_PROFILE_NAME_LEN: usize = 64;
 const MAX_PROFILE_ITEMS: usize = 64;
 const MAX_PROFILE_ITEM_LEN: usize = 256;
-const PROFILES_PATH: &str = "profiles.json";
+fn profiles_path() -> String {
+    std::env::var("PROFILES_PATH").unwrap_or_else(|_| "data/profiles.json".to_string())
+}
 
 #[derive(Serialize)]
 pub struct ChatMessage {
@@ -640,8 +642,9 @@ async fn get_upcoming_workouts(
 }
 
 async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde_json::Value>)> {
-    let data = std::fs::read_to_string(PROFILES_PATH).map_err(|err| {
-        eprintln!("Failed to read {}: {}", PROFILES_PATH, err);
+    let path = profiles_path();
+    let data = std::fs::read_to_string(&path).map_err(|err| {
+        eprintln!("Failed to read {}: {}", path, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Profiles configuration is unavailable.",
@@ -649,7 +652,7 @@ async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde
     })?;
 
     let parsed = serde_json::from_str::<ProfilesPayload>(&data).map_err(|err| {
-        eprintln!("Failed to parse {}: {}", PROFILES_PATH, err);
+        eprintln!("Failed to parse {}: {}", path, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Profiles configuration is invalid.",
@@ -657,7 +660,7 @@ async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde
     })?;
 
     let validated = validate_profiles_payload(parsed).map_err(|err| {
-        eprintln!("Validation failed for {}: {}", PROFILES_PATH, err);
+        eprintln!("Validation failed for {}: {}", path, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Profiles configuration is invalid.",
@@ -678,8 +681,9 @@ async fn update_profiles(
     let validated = validate_profiles_payload(payload)
         .map_err(|err| error_response(StatusCode::BAD_REQUEST, &err))?;
 
+    let path = profiles_path();
     let mut json_str = serde_json::to_string_pretty(&validated).map_err(|err| {
-        eprintln!("Failed to serialize {} payload: {}", PROFILES_PATH, err);
+        eprintln!("Failed to serialize {} payload: {}", path, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to persist profiles configuration.",
@@ -687,8 +691,8 @@ async fn update_profiles(
     })?;
     json_str.push('\n');
 
-    write_file_atomically(Path::new(PROFILES_PATH), &json_str).map_err(|err| {
-        eprintln!("Failed to atomically write {}: {}", PROFILES_PATH, err);
+    write_file_atomically(Path::new(&path), &json_str).map_err(|err| {
+        eprintln!("Failed to atomically write {}: {}", path, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to persist profiles configuration.",
