@@ -487,7 +487,10 @@ async fn post_chat(
         )
     })?;
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+    let gemini_model = std::env::var("GEMINI_MODEL")
+        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+
+    let ai_client = crate::ai_client::AiClient::new(gemini_key, gemini_model);
 
     {
         let db = state.database.lock().await;

@@ -39,7 +39,8 @@ Now we need to tell your new app your secrets.
    - _Note for Windows users_: Make sure it's not actually named `.env.txt`.
 4. Open your new `.env` file using a simple text editor (like TextEdit on Mac, or Notepad on Windows).
 5. Fill in the blanks:
-   - `GEMINI_API_KEY=your_gemini_api_key_here` (Paste the key you got from Google)
+   - `GEMINI_API_KEY=your_gemini_api_key_here` (Paste the key you got from [Google](https://ai.google.dev/gemini-api/docs/models))
+   - `GEMINI_MODEL=gemini-3-flash-preview` (To Change the AI Model, paste the model name here)
    - `SIGNAL_PHONE_NUMBER=+1234567890` (Put your bot's phone number here. Include the `+` and country code!)
    - `API_AUTH_TOKEN=make_up_a_long_password` (Just type a random string of characters here to protect your data. You won't ever need to remember this password).
 6. **Save** the file and close it.

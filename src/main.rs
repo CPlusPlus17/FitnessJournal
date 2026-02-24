@@ -321,7 +321,10 @@ pub async fn run_coach_pipeline(
         println!("\nGEMINI_API_KEY found! Generating workout via Gemini 3.1 Pro Preview...");
 
         // Initialize AI Client
-        let ai_client = crate::ai_client::AiClient::new(gemini_key);
+        let gemini_model = std::env::var("GEMINI_MODEL")
+            .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+        println!("Using AI model: {}", gemini_model);
+        let ai_client = crate::ai_client::AiClient::new(gemini_key, gemini_model);
 
         println!("Cleaning up previously generated workouts before generating a new plan...");
         if let Err(e) = garmin_client.cleanup_ai_workouts().await {
