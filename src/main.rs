@@ -20,9 +20,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     println!("Starting Fitness Coach...");
 
-    let database = Arc::new(Mutex::new(
-        Database::new().expect("Failed to initialize SQLite database"),
-    ));
+    let database = match Database::new() {
+        Ok(db) => Arc::new(Mutex::new(db)),
+        Err(e) => {
+            eprintln!("\n{}", "=".repeat(60));
+            eprintln!("🛑 DATABASE INITIALIZATION ERROR 🛑");
+            eprintln!("Failed to open or create the SQLite database.");
+            eprintln!("Error details: {}", e);
+            eprintln!("\n📝 Troubleshooting (Docker Users):");
+            eprintln!("If you are using docker-compose, 'fitness_journal.db' might have been automatically created as a DIRECTORY instead of a file.");
+            eprintln!("Please run these commands to fix this issue:");
+            eprintln!("  1. docker-compose down");
+            eprintln!("  2. rm -rf fitness_journal.db");
+            eprintln!("  3. touch fitness_journal.db");
+            eprintln!("  4. docker-compose up -d");
+            eprintln!("{}\n", "=".repeat(60));
+            std::process::exit(1);
+        }
+    };
 
     let coach = Arc::new(Coach::new());
 
