@@ -72,6 +72,10 @@ impl BotController {
                     if let Some(envelope) = parsed.get("envelope") {
                         if let Some(source) = envelope.get("source").and_then(|s| s.as_str()) {
                             sender = Some(source.to_string());
+                        } else if let Some(source_num) = envelope.get("sourceNumber").and_then(|s| s.as_str()) {
+                            sender = Some(source_num.to_string());
+                        } else if let Some(account) = parsed.get("account").and_then(|s| s.as_str()) {
+                            sender = Some(account.to_string());
                         }
 
                         timestamp = envelope
@@ -94,7 +98,13 @@ impl BotController {
                                 if let Some(msg_text) =
                                     sent_message.get("message").and_then(|m| m.as_str())
                                 {
-                                    text_content = Some(msg_text.to_string());
+                                    let destination = sent_message.get("destination").and_then(|d| d.as_str());
+                                    let destination_num = sent_message.get("destinationNumber").and_then(|d| d.as_str());
+                                    let account = parsed.get("account").and_then(|a| a.as_str());
+                                    
+                                    if destination == account || destination_num == account {
+                                        text_content = Some(msg_text.to_string());
+                                    }
                                 }
                             }
                         }
