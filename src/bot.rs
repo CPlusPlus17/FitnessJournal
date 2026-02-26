@@ -100,10 +100,25 @@ impl BotController {
                                 {
                                     let destination = sent_message.get("destination").and_then(|d| d.as_str());
                                     let destination_num = sent_message.get("destinationNumber").and_then(|d| d.as_str());
+                                    let destination_uuid = sent_message.get("destinationUuid").and_then(|d| d.as_str());
                                     let account = parsed.get("account").and_then(|a| a.as_str());
+                                    let source = envelope.get("source").and_then(|s| s.as_str());
+                                    let source_uuid = envelope.get("sourceUuid").and_then(|s| s.as_str());
                                     
-                                    if destination == account || destination_num == account {
+                                    let is_note_to_self = 
+                                        (destination.is_some() && destination == account) ||
+                                        (destination_num.is_some() && destination_num == account) ||
+                                        (destination.is_some() && destination == source) ||
+                                        (destination_uuid.is_some() && destination_uuid == source_uuid && source_uuid.is_some());
+
+                                    if is_note_to_self {
                                         text_content = Some(msg_text.to_string());
+                                        // Ensure sender is the account so we reply correctly to Note to Self
+                                        if let Some(acc) = account {
+                                            sender = Some(acc.to_string());
+                                        }
+                                    } else {
+                                        println!("Ignoring sent message to foreign destination: {:?}", destination);
                                     }
                                 }
                             }
