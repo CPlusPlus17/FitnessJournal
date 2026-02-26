@@ -125,9 +125,9 @@ impl AiClient {
         Err(anyhow!("No valid content returned from Gemini"))
     }
 
-    pub async fn chat_with_history(&self, history: &[(String, String)]) -> Result<String> {
+    pub async fn chat_with_history(&self, history: &[(String, String, u64)]) -> Result<String> {
         let mut contents = Vec::new();
-        for (role, text) in history {
+        for (role, text, _) in history {
             contents.push(Content {
                 role: role.clone(),
                 parts: vec![Part { text: text.clone() }],

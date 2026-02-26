@@ -244,8 +244,174 @@ impl BotController {
             .send()
             .await;
 
-        if let Err(e) = res {
-            eprintln!("Failed to send Signal reply: {}", e);
+        match res {
+            Ok(r) => {
+                if !r.status().is_success() {
+                    let status = r.status();
+                    if let Ok(body) = r.text().await {
+                        eprintln!("Signal reply failed with status {}: {}", status, body);
+                    } else {
+                        eprintln!("Signal reply failed with status {}", status);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to send Signal reply network error: {}", e);
+            }
         }
     }
+}
+
+pub async fn broadcast_message(text: &str) {
+    let subscribers_var = std::env::var("SIGNAL_SUBSCRIBERS").unwrap_or_default();
+    if subscribers_var.trim().is_empty() {
+        return;
+    }
+
+    let recipients: Vec<String> = subscribers_var
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if recipients.is_empty() {
+        return;
+    }
+
+    let send_req = SendMessageReq {
+        message: text.to_string(),
+        number: std::env::var("SIGNAL_PHONE_NUMBER")
+            .unwrap_or_else(|_| "+1234567890".to_string()),
+        recipients,
+    };
+
+    let api_host = std::env::var("SIGNAL_API_HOST")
+        .unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{}:8080/v2/send", api_host))
+        .json(&send_req)
+        .send()
+        .await;
+
+    match res {
+        Ok(r) => {
+            if !r.status().is_success() {
+                let status = r.status();
+                if let Ok(body) = r.text().await {
+                    eprintln!("Signal broadcast failed with status {}: {}", status, body);
+                } else {
+                    eprintln!("Signal broadcast failed with status {}", status);
+                }
+            } else {
+                println!("Signal broadcast succeeded!");
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to broadcast Signal message network error: {}", e);
+        }
+    }
+}
+
+pub fn format_workout_details(workout_spec: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let name = workout_spec.get("workoutName").and_then(|v| v.as_str()).unwrap_or("Unknown Workout");
+    
+    let display_name = crate::garmin_client::ensure_ai_workout_name(name);
+    out.push_str(&format!("🏋️ {}\n", display_name));
+    
+    if let Some(desc) = workout_spec.get("description").and_then(|v| v.as_str()) {
+        out.push_str(&format!("{}\n", desc));
+    }
+    if let Some(steps) = workout_spec.get("steps").and_then(|v| v.as_array()) {
+        if !steps.is_empty() {
+            out.push_str("\nSteps:\n");
+            for step in steps {
+                let exercise = step.get("exercise").and_then(|v| v.as_str()).unwrap_or("Activity");
+                let phase = step.get("phase").and_then(|v| v.as_str()).unwrap_or("");
+                let mut details = format!("- [{}] {}", phase.to_uppercase(), exercise);
+                
+                if let Some(dur) = step.get("duration").and_then(|v| v.as_str()) {
+                    details.push_str(&format!(" ({})", dur));
+                } else if let Some(dur_int) = step.get("duration").and_then(|v| v.as_i64()) {
+                    details.push_str(&format!(" ({} mins)", dur_int));
+                }
+                if let Some(reps) = step.get("reps") {
+                    let r = if reps.is_string() { reps.as_str().unwrap().to_string() } else { reps.to_string() };
+                    details.push_str(&format!(" | Reps: {}", r));
+                }
+                if let Some(sets) = step.get("sets") {
+                    details.push_str(&format!(" | Sets: {}", sets));
+                }
+                if let Some(weight) = step.get("weight") {
+                    let w = if weight.is_string() { weight.as_str().unwrap().to_string() } else { weight.to_string() };
+                    if w != "0" && w != "0.0" {
+                       details.push_str(&format!(" | Weight: {}kg", w));
+                    }
+                }
+                if let Some(note) = step.get("note").and_then(|v| v.as_str()) {
+                    details.push_str(&format!("\n  📝 {}", note));
+                }
+                out.push_str(&details);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
+    tokio::spawn(async move {
+        let mut last_sent_date = String::new();
+
+        loop {
+            let now = chrono::Local::now();
+            let today = now.format("%Y-%m-%d").to_string();
+
+            let time_str = std::env::var("MORNING_MESSAGE_TIME")
+                .unwrap_or_else(|_| "07:00".to_string());
+
+            let current_time = now.format("%H:%M").to_string();
+
+            if current_time == time_str && last_sent_date != today {
+                match garmin_client.fetch_data().await {
+                    Ok(data) => {
+                        let today_workouts: Vec<_> = data
+                            .scheduled_workouts
+                            .iter()
+                            .filter(|w| w.date.starts_with(&today))
+                            .collect();
+
+                        if !today_workouts.is_empty() {
+                            let planned_str = today_workouts
+                                .iter()
+                                .map(|w| {
+                                    format!(
+                                        "{} ({})",
+                                        w.title.as_deref().unwrap_or("Untitled"),
+                                        w.sport.as_deref().unwrap_or("Unknown")
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n- ");
+
+                            let msg = format!(
+                                "🌅 Good morning! You have workouts scheduled for today:\n- {}",
+                                planned_str
+                            );
+                            broadcast_message(&msg).await;
+                        }
+
+                        last_sent_date = today;
+                    }
+                    Err(e) => {
+                        eprintln!("Morning notifier failed to fetch garmin data: {}", e);
+                    }
+                }
+            }
+
+            // Sleep for roughly a minute
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    });
 }

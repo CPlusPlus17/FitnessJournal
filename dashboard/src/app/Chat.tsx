@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 type ChatMessage = {
     role: string;
     content: string;
+    created_at?: number;
 };
 
 function stripNode<T extends { node?: unknown }>(props: T): Omit<T, 'node'> {
@@ -51,7 +52,7 @@ export default function Chat() {
 
         const userMessage = input.trim();
         setInput('');
-        setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+        setMessages((prev) => [...prev, { role: 'user', content: userMessage, created_at: Math.floor(Date.now() / 1000) }]);
         setLoading(true);
 
         try {
@@ -83,7 +84,20 @@ export default function Chat() {
             <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 z-10 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                 {messages.map((msg, idx) => (
                     <div key={idx} className={`p-4 rounded-2xl max-w-[90%] ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 ml-auto border border-indigo-500/30' : 'bg-black/40 text-gray-300 border border-white/10'}`}>
-                        <div className="text-xs text-gray-500 mb-2 uppercase tracking-wider">{msg.role === 'user' ? 'You' : 'Coach Gemini'}</div>
+                        <div className="text-xs text-gray-500 mb-2 tracking-wider flex justify-between items-center whitespace-nowrap gap-4">
+                            <span className="uppercase overflow-hidden text-ellipsis">{msg.role === 'user' ? 'You' : 'Coach Gemini'}</span>
+                            {msg.created_at && (
+                                <span className="text-[10px] opacity-70 normal-case">
+                                    {new Date(msg.created_at * 1000).toLocaleString(undefined, {
+                                        year: 'numeric',
+                                        month: 'numeric',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                    })}
+                                </span>
+                            )}
+                        </div>
                         <div className="text-sm leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
                             <ReactMarkdown
                                 components={{

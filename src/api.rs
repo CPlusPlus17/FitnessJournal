@@ -31,6 +31,7 @@ const PROFILES_PATH: &str = "profiles.json";
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    pub created_at: u64,
 }
 
 #[derive(Deserialize)]
@@ -434,8 +435,8 @@ async fn get_chat(State(state): State<ApiState>) -> Json<Vec<ChatMessage>> {
     let db = state.database.lock().await;
     let history = db.get_ai_chat_history().unwrap_or_default();
     let mut resp = Vec::with_capacity(history.len());
-    for (role, content) in history {
-        resp.push(ChatMessage { role, content });
+    for (role, content, created_at) in history {
+        resp.push(ChatMessage { role, content, created_at });
     }
     Json(resp)
 }

@@ -190,6 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_daemon {
         println!("Starting Fitness Coach in DAEMON mode. Will run every 24 hours.");
+        crate::bot::start_morning_notifier(garmin_client.clone());
         loop {
             run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
             println!("Sleeping for 24 hours... zzz");
@@ -390,6 +391,8 @@ pub async fn run_coach_pipeline(
                             vec![parsed]
                         };
 
+                        let mut generated_count = 0;
+                        let mut scheduled_details = Vec::new();
                         for w in workouts {
                             let mut workout_spec = w;
                             if let Some(obj) = workout_spec.as_object_mut() {
@@ -477,11 +480,26 @@ pub async fn run_coach_pipeline(
                                     .connectapi_post(&sched_endpoint, &sched_payload)
                                     .await
                                 {
-                                    Ok(_) => println!("Successfully scheduled on {}", sch_date),
+                                    Ok(_) => {
+                                        println!("Successfully scheduled on {}", sch_date);
+                                        generated_count += 1;
+                                        let detailed_str = crate::bot::format_workout_details(&workout_spec);
+                                        scheduled_details.push(format!("📅 Scheduled for: {}\n{}", sch_date, detailed_str));
+                                    }
                                     Err(e) => println!("Failed to schedule: {}", e),
                                 }
                             }
                         }
+                        
+                        if generated_count > 0 {
+                            let mut msg = format!("✅ AI Coach has successfully generated and scheduled {} new workouts!", generated_count);
+                            if !scheduled_details.is_empty() {
+                                msg.push_str("\n\n");
+                                msg.push_str(&scheduled_details.join("\n\n"));
+                            }
+                            crate::bot::broadcast_message(&msg).await;
+                        }
+                        
                         let _ = database.lock().await.clear_garmin_cache();
                     }
                     Err(e) => {

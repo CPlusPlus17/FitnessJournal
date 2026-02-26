@@ -114,10 +114,10 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_ai_chat_history(&self) -> Result<Vec<(String, String)>> {
+    pub fn get_ai_chat_history(&self) -> Result<Vec<(String, String, u64)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT role, content FROM (
-                SELECT id, role, content
+            "SELECT role, content, created_at FROM (
+                SELECT id, role, content, created_at
                 FROM ai_chats
                 ORDER BY id DESC
                 LIMIT ?1
@@ -130,7 +130,8 @@ impl Database {
         while let Some(row) = rows.next()? {
             let role: String = row.get(0)?;
             let content: String = row.get(1)?;
-            history.push((role, content));
+            let created_at: u64 = row.get(2)?;
+            history.push((role, content, created_at));
         }
 
         Ok(history)

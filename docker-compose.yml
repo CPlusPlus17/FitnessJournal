@@ -20,6 +20,8 @@ services:
     container_name: fitness-coach
     env_file:
       - .env
+    environment:
+      - TZ=Europe/Zurich
     depends_on:
       - signal-api
     volumes:

@@ -45,6 +45,12 @@ Clone the repository and set up your core configuration files:
    DASHBOARD_ADMIN_PASSWORD=change_me_to_a_second_long_random_value
    ```
 
+   **Note on Timezones:** By default, Docker containers run in UTC. If you want the `MORNING_MESSAGE_TIME` to trigger at your correct local time, you must add your timezone to the `fitness-coach` service in `docker-compose.yml`:
+   ```yaml
+   environment:
+     - TZ=Europe/Zurich # Change to your local timezone
+   ```
+
 2. Log in to Garmin to generate your tokens:
    ```bash
    cargo run -- --login
