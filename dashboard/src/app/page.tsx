@@ -3,6 +3,8 @@ import Link from 'next/link';
 import GenerateButton from './GenerateButton';
 import MuscleMap from './MuscleMap';
 import Chat from './Chat';
+import AnalyzeButton from './AnalyzeButton';
+import ForcePullButton from './ForcePullButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -301,8 +303,9 @@ export default async function Dashboard() {
               Live AI Coaching Dashboard and Garmin Connect Integration.
             </p>
           </div>
-          <div>
-            <Link href="/settings" className="px-4 py-2 bg-white/10 text-white rounded-md hover:bg-white/20 transition backdrop-blur-md border border-white/20 flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            <ForcePullButton />
+            <Link href="/settings" className="px-4 py-2 bg-white/10 text-white rounded-md hover:bg-white/20 transition backdrop-blur-md border border-white/20 flex items-center gap-2 h-[42px]">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
               Configuration
             </Link>
@@ -399,7 +402,7 @@ export default async function Dashboard() {
 
               return (
                 <div key={idx} className="glass-panel p-5 group relative border border-indigo-500/20">
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                   <div className="flex justify-between items-start mb-2">
                     <h4 className="text-white font-medium">{workout.title || workout.description || "Training"}</h4>
                     <span className="text-xs px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full">{workout.type || workout.sport || "Workout"}</span>
@@ -453,7 +456,7 @@ export default async function Dashboard() {
 
               return (
                 <div key={idx} className={`glass-panel p-5 group relative border transition-all ${borderClass}`}>
-                  <div className={`absolute inset-0 bg-gradient-to-br ${bgHoverClass} to-transparent opacity-0 group-hover:opacity-100 transition-opacity`} />
+                  <div className={`absolute inset-0 bg-gradient-to-br ${bgHoverClass} to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`} />
 
                   {isPrimary && (
                     <div className="absolute -top-3 -right-3">
@@ -508,7 +511,7 @@ export default async function Dashboard() {
               </div>
             ) : todayWorkouts.done.map((workout: CompletedWorkout, idx: number) => (
               <div key={idx} className="glass-panel p-5 group relative border border-emerald-500/20">
-                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                 <div className="flex justify-between items-start mb-2">
                   <h4 className="text-white font-medium">{workout.name}</h4>
                   <span className="text-xs px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded-full">{extractType(workout.type || workout.activity_type) || "Activity"}</span>
@@ -533,6 +536,7 @@ export default async function Dashboard() {
                     </div>
                   )}
                 </div>
+                <AnalyzeButton workout={workout} />
               </div>
             ))}
           </div>
@@ -551,7 +555,7 @@ export default async function Dashboard() {
               </div>
             ) : data.map((item, idx) => (
               <div key={idx} className="glass-panel p-5 group cursor-default relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                 <h4 className="text-gray-400 text-sm font-medium tracking-wider truncate" title={item.exercise_name}>
                   {item.exercise_name}
                 </h4>

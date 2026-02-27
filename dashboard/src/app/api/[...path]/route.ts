@@ -9,6 +9,8 @@ const ALLOWED_PATHS = new Set([
   'chat',
   'generate',
   'profiles',
+  'analyze',
+  'force-pull',
 ]);
 
 export const dynamic = 'force-dynamic';

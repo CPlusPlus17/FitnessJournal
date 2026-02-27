@@ -40,6 +40,11 @@ pub struct ChatInput {
 }
 
 #[derive(Deserialize)]
+pub struct AnalyzeActivityInput {
+    pub activity: serde_json::Value,
+}
+
+#[derive(Deserialize)]
 pub struct PredictDurationInput {
     pub title: Option<String>,
     pub sport: Option<String>,
@@ -379,8 +384,10 @@ pub async fn run_server(
         .route("/api/recovery", get(get_recovery))
         .route("/api/workouts/today", get(get_today_workouts))
         .route("/api/workouts/upcoming", get(get_upcoming_workouts))
+        .route("/api/force-pull", axum::routing::post(force_pull_data))
         .route("/api/generate", axum::routing::post(trigger_generate))
         .route("/api/predict_duration", axum::routing::post(predict_duration))
+        .route("/api/analyze", axum::routing::post(analyze_activity))
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
         .route("/api/profiles", get(get_profiles).put(update_profiles))
@@ -756,6 +763,72 @@ async fn predict_duration(
                 "duration": parsed
             })))
         },
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            })),
+        )),
+    }
+}
+
+async fn analyze_activity(
+    State(_state): State<ApiState>,
+    Json(input): Json<AnalyzeActivityInput>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let gemini_key = match std::env::var("GEMINI_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": "GEMINI_API_KEY not configured"
+                })),
+            ))
+        }
+    };
+
+    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+    let prompt = format!(
+        "Please provide an in-depth analysis of this completed fitness activity. Be encouraging but highly analytical.\n\nYou have been provided with the complete, raw JSON payload direct from Garmin. It contains many undocumented fields, extra metrics, recovery data, elevation, stress, cadence, temperatures, or detailed exercise sets.\n\nPlease actively hunt through this raw JSON and surface interesting insights, anomalies, or performance correlations that wouldn't be obvious from just the basic time/distance metrics. Explain what these deeper metrics mean for the athlete's progress.\n\nHere is the raw Garmin activity data in JSON format:\n\n{}",
+        serde_json::to_string(&input.activity).unwrap_or_default()
+    );
+
+    match ai_client.generate_workout(&prompt).await {
+        Ok(text) => Ok(Json(serde_json::json!({
+            "analysis": text
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            })),
+        )),
+    }
+}
+
+async fn force_pull_data(State(state): State<ApiState>) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    {
+        let db = state.database.lock().await;
+        if let Err(e) = db.clear_garmin_cache() {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to clear database garmin cache: {}", e)
+                })),
+            ));
+        }
+    }
+
+    match state.garmin_client.fetch_data().await {
+        Ok(_) => Ok(Json(serde_json::json!({
+            "status": "success",
+            "message": "Data successfully force-pulled from Garmin."
+        }))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
