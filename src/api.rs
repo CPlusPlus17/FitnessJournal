@@ -60,6 +60,8 @@ struct ProfileConfigPayload {
     constraints: Vec<String>,
     #[serde(default)]
     available_equipment: Vec<String>,
+    #[serde(default)]
+    auto_analyze_sports: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +281,11 @@ fn validate_profiles_payload(payload: ProfilesPayload) -> Result<ProfilesPayload
                 profile_name,
                 "available_equipment",
             )?,
+            auto_analyze_sports: normalize_profile_list(
+                &profile.auto_analyze_sports,
+                profile_name,
+                "auto_analyze_sports",
+            )?,
         };
 
         normalized_profiles.insert(profile_name.to_string(), normalized_profile);
@@ -386,7 +393,10 @@ pub async fn run_server(
         .route("/api/workouts/upcoming", get(get_upcoming_workouts))
         .route("/api/force-pull", axum::routing::post(force_pull_data))
         .route("/api/generate", axum::routing::post(trigger_generate))
-        .route("/api/predict_duration", axum::routing::post(predict_duration))
+        .route(
+            "/api/predict_duration",
+            axum::routing::post(predict_duration),
+        )
         .route("/api/analyze", axum::routing::post(analyze_activity))
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
@@ -451,7 +461,11 @@ async fn get_chat(State(state): State<ApiState>) -> Json<Vec<ChatMessage>> {
     let history = db.get_ai_chat_history().unwrap_or_default();
     let mut resp = Vec::with_capacity(history.len());
     for (role, content, created_at) in history {
-        resp.push(ChatMessage { role, content, created_at });
+        resp.push(ChatMessage {
+            role,
+            content,
+            created_at,
+        });
     }
     Json(resp)
 }
@@ -758,11 +772,11 @@ async fn predict_duration(
                 let db = state.database.lock().await;
                 let _ = db.set_predicted_duration(&cache_key, parsed);
             }
-            
+
             Ok(Json(serde_json::json!({
                 "duration": parsed
             })))
-        },
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
@@ -774,9 +788,27 @@ async fn predict_duration(
 }
 
 async fn analyze_activity(
-    State(_state): State<ApiState>,
+    State(state): State<ApiState>,
     Json(input): Json<AnalyzeActivityInput>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let garmin_act =
+        serde_json::from_value::<crate::models::GarminActivity>(input.activity.clone()).ok();
+    let activity_id = garmin_act.as_ref().and_then(|a| a.id);
+    let start_time = garmin_act
+        .as_ref()
+        .map(|a| a.start_time.clone())
+        .unwrap_or_default();
+
+    // Check DB first
+    if let Some(id) = activity_id {
+        let db = state.database.lock().await;
+        if let Ok(Some(existing_analysis)) = db.get_activity_analysis(id) {
+            return Ok(Json(serde_json::json!({
+                "analysis": existing_analysis
+            })));
+        }
+    }
+
     let gemini_key = match std::env::var("GEMINI_API_KEY") {
         Ok(k) if !k.is_empty() => k,
         _ => {
@@ -797,9 +829,16 @@ async fn analyze_activity(
     );
 
     match ai_client.generate_workout(&prompt).await {
-        Ok(text) => Ok(Json(serde_json::json!({
-            "analysis": text
-        }))),
+        Ok(text) => {
+            // Save to DB
+            if let Some(id) = activity_id {
+                let db = state.database.lock().await;
+                let _ = db.save_activity_analysis(id, &start_time, &text);
+            }
+            Ok(Json(serde_json::json!({
+                "analysis": text
+            })))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
@@ -810,7 +849,9 @@ async fn analyze_activity(
     }
 }
 
-async fn force_pull_data(State(state): State<ApiState>) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+async fn force_pull_data(
+    State(state): State<ApiState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     {
         let db = state.database.lock().await;
         if let Err(e) = db.clear_garmin_cache() {

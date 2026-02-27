@@ -19,7 +19,10 @@ use tokio::sync::Mutex;
 #[derive(Parser, Debug)]
 #[command(name = "fitness_journal", about = "Fitness Coach AI")]
 struct Cli {
-    #[arg(long, help = "Run as a background daemon calculating workloads every 24h")]
+    #[arg(
+        long,
+        help = "Run as a background daemon calculating workloads every 24h"
+    )]
     daemon: bool,
     #[arg(long, help = "Start Signal bot listener")]
     signal: bool,
@@ -301,6 +304,8 @@ pub async fn run_coach_pipeline(
         available_equipment: vec![],
     };
 
+    let mut auto_analyze_sports = Vec::new();
+
     // Load active profile from profiles.json
     if let Ok(profile_data) = std::fs::read_to_string("profiles.json") {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&profile_data) {
@@ -336,6 +341,72 @@ pub async fn run_coach_pipeline(
                             .iter()
                             .filter_map(|v| v.as_str().map(|s| s.to_string()))
                             .collect();
+                    }
+                    if let Some(sports) = profile
+                        .get("auto_analyze_sports")
+                        .and_then(|s| s.as_array())
+                    {
+                        auto_analyze_sports = sports
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 2c. Auto-Analyze Activities (Signal Cheerleader) ---
+    if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
+        if !auto_analyze_sports.is_empty() {
+            let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+            let db = database.lock().await;
+
+            // Only analyze recent activities (from today or yesterday) to avoid spamming 50+ backlogs
+            let today = chrono::Local::now();
+            let yesterday = today - chrono::Duration::days(1);
+            let today_str = today.format("%Y-%m-%d").to_string();
+            let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
+
+            for act in &detailed_activities {
+                if !act.start_time.starts_with(&today_str)
+                    && !act.start_time.starts_with(&yesterday_str)
+                {
+                    continue;
+                }
+
+                if let (Some(id), Some(act_type)) = (act.id, act.get_activity_type()) {
+                    if auto_analyze_sports.contains(&act_type.to_string()) {
+                        let is_analyzed = db.is_activity_analyzed(id).unwrap_or(false);
+                        if !is_analyzed {
+                            println!("Activity {} ({}) matches auto_analyze_sports. Requesting analysis...", id, act_type);
+
+                            let prompt = format!(
+                                "Please provide an in-depth analysis of this completed fitness activity. Be encouraging but highly analytical.\n\nYou have been provided with the complete, raw JSON payload direct from Garmin. It contains many undocumented fields, extra metrics, recovery data, elevation, stress, cadence, temperatures, or detailed exercise sets.\n\nPlease actively hunt through this raw JSON and surface interesting insights, anomalies, or performance correlations that wouldn't be obvious from just the basic time/distance metrics. Explain what these deeper metrics mean for the athlete's progress.\n\nKeep the response concise enough for a messaging app (max 2-3 short paragraphs) and format it directly as text without any markdown wrappers.\n\nHere is the raw activity data:\n\n{}",
+                                serde_json::to_string(act).unwrap_or_default()
+                            );
+
+                            match ai_client.generate_workout(&prompt).await {
+                                Ok(analysis) => {
+                                    println!("Analysis generated! Broadcasting via Signal...");
+                                    let msg = format!(
+                                        "📊 **Activity Analysis: {}**\n\n{}",
+                                        act.name.as_deref().unwrap_or("Untitled Workout"),
+                                        analysis
+                                    );
+                                    crate::bot::broadcast_message(&msg).await;
+
+                                    if let Err(e) =
+                                        db.save_activity_analysis(id, &act.start_time, &analysis)
+                                    {
+                                        eprintln!("Failed to save activity analysis to DB: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to generate analysis for {}: {}", id, e)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -512,14 +583,18 @@ pub async fn run_coach_pipeline(
                                     Ok(_) => {
                                         println!("Successfully scheduled on {}", sch_date);
                                         generated_count += 1;
-                                        let detailed_str = crate::bot::format_workout_details(&workout_spec);
-                                        scheduled_details.push(format!("📅 Scheduled for: {}\n{}", sch_date, detailed_str));
+                                        let detailed_str =
+                                            crate::bot::format_workout_details(&workout_spec);
+                                        scheduled_details.push(format!(
+                                            "📅 Scheduled for: {}\n{}",
+                                            sch_date, detailed_str
+                                        ));
                                     }
                                     Err(e) => println!("Failed to schedule: {}", e),
                                 }
                             }
                         }
-                        
+
                         if generated_count > 0 {
                             let mut msg = format!("✅ AI Coach has successfully generated and scheduled {} new workouts!", generated_count);
                             if !scheduled_details.is_empty() {
@@ -528,7 +603,7 @@ pub async fn run_coach_pipeline(
                             }
                             crate::bot::broadcast_message(&msg).await;
                         }
-                        
+
                         let _ = database.lock().await.clear_garmin_cache();
                     }
                     Err(e) => {

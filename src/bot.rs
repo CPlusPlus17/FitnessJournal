@@ -77,9 +77,12 @@ impl BotController {
                     if let Some(envelope) = parsed.get("envelope") {
                         if let Some(source) = envelope.get("source").and_then(|s| s.as_str()) {
                             sender = Some(source.to_string());
-                        } else if let Some(source_num) = envelope.get("sourceNumber").and_then(|s| s.as_str()) {
+                        } else if let Some(source_num) =
+                            envelope.get("sourceNumber").and_then(|s| s.as_str())
+                        {
                             sender = Some(source_num.to_string());
-                        } else if let Some(account) = parsed.get("account").and_then(|s| s.as_str()) {
+                        } else if let Some(account) = parsed.get("account").and_then(|s| s.as_str())
+                        {
                             sender = Some(account.to_string());
                         }
 
@@ -103,18 +106,27 @@ impl BotController {
                                 if let Some(msg_text) =
                                     sent_message.get("message").and_then(|m| m.as_str())
                                 {
-                                    let destination = sent_message.get("destination").and_then(|d| d.as_str());
-                                    let destination_num = sent_message.get("destinationNumber").and_then(|d| d.as_str());
-                                    let destination_uuid = sent_message.get("destinationUuid").and_then(|d| d.as_str());
+                                    let destination =
+                                        sent_message.get("destination").and_then(|d| d.as_str());
+                                    let destination_num = sent_message
+                                        .get("destinationNumber")
+                                        .and_then(|d| d.as_str());
+                                    let destination_uuid = sent_message
+                                        .get("destinationUuid")
+                                        .and_then(|d| d.as_str());
                                     let account = parsed.get("account").and_then(|a| a.as_str());
                                     let source = envelope.get("source").and_then(|s| s.as_str());
-                                    let source_uuid = envelope.get("sourceUuid").and_then(|s| s.as_str());
-                                    
-                                    let is_note_to_self = 
-                                        (destination.is_some() && destination == account) ||
-                                        (destination_num.is_some() && destination_num == account) ||
-                                        (destination.is_some() && destination == source) ||
-                                        (destination_uuid.is_some() && destination_uuid == source_uuid && source_uuid.is_some());
+                                    let source_uuid =
+                                        envelope.get("sourceUuid").and_then(|s| s.as_str());
+
+                                    let is_note_to_self = (destination.is_some()
+                                        && destination == account)
+                                        || (destination_num.is_some()
+                                            && destination_num == account)
+                                        || (destination.is_some() && destination == source)
+                                        || (destination_uuid.is_some()
+                                            && destination_uuid == source_uuid
+                                            && source_uuid.is_some());
 
                                     if is_note_to_self {
                                         text_content = Some(msg_text.to_string());
@@ -123,7 +135,10 @@ impl BotController {
                                             sender = Some(acc.to_string());
                                         }
                                     } else {
-                                        println!("Ignoring sent message to foreign destination: {:?}", destination);
+                                        println!(
+                                            "Ignoring sent message to foreign destination: {:?}",
+                                            destination
+                                        );
                                     }
                                 }
                             }
@@ -304,7 +319,7 @@ pub async fn broadcast_message(text: &str) {
     if recipients.is_empty() {
         return;
     }
-    
+
     let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
         Ok(n) if !n.trim().is_empty() => n,
         _ => {
@@ -319,8 +334,8 @@ pub async fn broadcast_message(text: &str) {
         recipients,
     };
 
-    let api_host = std::env::var("SIGNAL_API_HOST")
-        .unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
+    let api_host =
+        std::env::var("SIGNAL_API_HOST").unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
     let client = reqwest::Client::new();
     let res = client
         .post(format!("http://{}:8080/v2/send", api_host))
@@ -349,11 +364,14 @@ pub async fn broadcast_message(text: &str) {
 
 pub fn format_workout_details(workout_spec: &serde_json::Value) -> String {
     let mut out = String::new();
-    let name = workout_spec.get("workoutName").and_then(|v| v.as_str()).unwrap_or("Unknown Workout");
-    
+    let name = workout_spec
+        .get("workoutName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown Workout");
+
     let display_name = crate::garmin_client::ensure_ai_workout_name(name);
     out.push_str(&format!("🏋️ {}\n", display_name));
-    
+
     if let Some(desc) = workout_spec.get("description").and_then(|v| v.as_str()) {
         out.push_str(&format!("{}\n", desc));
     }
@@ -361,26 +379,37 @@ pub fn format_workout_details(workout_spec: &serde_json::Value) -> String {
         if !steps.is_empty() {
             out.push_str("\nSteps:\n");
             for step in steps {
-                let exercise = step.get("exercise").and_then(|v| v.as_str()).unwrap_or("Activity");
+                let exercise = step
+                    .get("exercise")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Activity");
                 let phase = step.get("phase").and_then(|v| v.as_str()).unwrap_or("");
                 let mut details = format!("- [{}] {}", phase.to_uppercase(), exercise);
-                
+
                 if let Some(dur) = step.get("duration").and_then(|v| v.as_str()) {
                     details.push_str(&format!(" ({})", dur));
                 } else if let Some(dur_int) = step.get("duration").and_then(|v| v.as_i64()) {
                     details.push_str(&format!(" ({} mins)", dur_int));
                 }
                 if let Some(reps) = step.get("reps") {
-                    let r = if reps.is_string() { reps.as_str().unwrap().to_string() } else { reps.to_string() };
+                    let r = if reps.is_string() {
+                        reps.as_str().unwrap().to_string()
+                    } else {
+                        reps.to_string()
+                    };
                     details.push_str(&format!(" | Reps: {}", r));
                 }
                 if let Some(sets) = step.get("sets") {
                     details.push_str(&format!(" | Sets: {}", sets));
                 }
                 if let Some(weight) = step.get("weight") {
-                    let w = if weight.is_string() { weight.as_str().unwrap().to_string() } else { weight.to_string() };
+                    let w = if weight.is_string() {
+                        weight.as_str().unwrap().to_string()
+                    } else {
+                        weight.to_string()
+                    };
                     if w != "0" && w != "0.0" {
-                       details.push_str(&format!(" | Weight: {}kg", w));
+                        details.push_str(&format!(" | Weight: {}kg", w));
                     }
                 }
                 if let Some(note) = step.get("note").and_then(|v| v.as_str()) {
@@ -402,8 +431,8 @@ pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
             let now = chrono::Local::now();
             let today = now.format("%Y-%m-%d").to_string();
 
-            let time_str = std::env::var("MORNING_MESSAGE_TIME")
-                .unwrap_or_else(|_| "07:00".to_string());
+            let time_str =
+                std::env::var("MORNING_MESSAGE_TIME").unwrap_or_else(|_| "07:00".to_string());
 
             let current_time = now.format("%H:%M").to_string();
 

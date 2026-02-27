@@ -135,7 +135,7 @@ pub struct GarminActivity {
     #[serde(rename = "maxHR")]
     pub max_hr: Option<f64>,
     pub sets: Option<GarminSetsData>,
-    
+
     // Capture all other raw Garmin properties
     #[serde(flatten)]
     pub raw_fields: std::collections::HashMap<String, serde_json::Value>,
@@ -153,7 +153,6 @@ impl GarminActivity {
         None
     }
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]

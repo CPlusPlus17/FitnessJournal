@@ -59,6 +59,14 @@ impl Database {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS activity_analysis (
+                activity_id INTEGER PRIMARY KEY,
+                date TEXT NOT NULL,
+                summary TEXT NOT NULL
+            )",
+            [],
+        )?;
 
         Ok(Database { conn })
     }
@@ -372,7 +380,8 @@ impl Database {
     }
 
     pub fn clear_garmin_cache(&self) -> Result<()> {
-        self.conn.execute("DELETE FROM kv_store WHERE key = 'garmin_cache'", [])?;
+        self.conn
+            .execute("DELETE FROM kv_store WHERE key = 'garmin_cache'", [])?;
         Ok(())
     }
 
@@ -405,6 +414,40 @@ impl Database {
              value = excluded.value, 
              updated_at = excluded.updated_at",
             params![key, value, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_activity_analyzed(&self, activity_id: i64) -> Result<bool> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT 1 FROM activity_analysis WHERE activity_id = ?1")?;
+        let exists = stmt.exists([activity_id])?;
+        Ok(exists)
+    }
+
+    pub fn get_activity_analysis(&self, activity_id: i64) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT summary FROM activity_analysis WHERE activity_id = ?1")?;
+        let mut rows = stmt.query([activity_id])?;
+        if let Some(row) = rows.next()? {
+            let summary: String = row.get(0)?;
+            Ok(Some(summary))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn save_activity_analysis(
+        &self,
+        activity_id: i64,
+        date: &str,
+        summary: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO activity_analysis (activity_id, date, summary) VALUES (?1, ?2, ?3)",
+            params![activity_id, date, summary],
         )?;
         Ok(())
     }

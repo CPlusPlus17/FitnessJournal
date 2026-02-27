@@ -43,10 +43,7 @@ impl Coach {
         let bike_count = recent_activities
             .iter()
             .filter(|a| {
-                let s = a
-                    .get_activity_type()
-                    .unwrap_or("unknown")
-                    .to_lowercase();
+                let s = a.get_activity_type().unwrap_or("unknown").to_lowercase();
                 s.contains("cycling") || s.contains("biking")
             })
             .count();
@@ -64,10 +61,7 @@ impl Coach {
         let strength_count = recent_activities
             .iter()
             .filter(|a| {
-                let s = a
-                    .get_activity_type()
-                    .unwrap_or("unknown")
-                    .to_lowercase();
+                let s = a.get_activity_type().unwrap_or("unknown").to_lowercase();
                 s.contains("strength") || s.contains("fitness")
             })
             .count();
@@ -412,10 +406,7 @@ impl Coach {
         let bike_count = recent_30d
             .iter()
             .filter(|a| {
-                let s = a
-                    .get_activity_type()
-                    .unwrap_or("unknown")
-                    .to_lowercase();
+                let s = a.get_activity_type().unwrap_or("unknown").to_lowercase();
                 s.contains("bike") || s.contains("cycl")
             })
             .count();

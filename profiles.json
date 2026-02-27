@@ -38,6 +38,12 @@
         "Sit-up Cushion",
         "Rowing Machine",
         "Skipping Rope"
+      ],
+      "auto_analyze_sports": [
+        "running",
+        "strength_training",
+        "treadmill_running",
+        "track_running"
       ]
     },
     "travel_hotel": {

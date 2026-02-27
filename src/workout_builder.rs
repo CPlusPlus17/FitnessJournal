@@ -151,7 +151,10 @@ impl WorkoutBuilder {
                     }
                 }
             }
-            println!("Loaded {} elements into exercise DB from CSV", self.exercise_db.len());
+            println!(
+                "Loaded {} elements into exercise DB from CSV",
+                self.exercise_db.len()
+            );
         } else {
             println!("Warning: Could not read CSV at {}", path);
         }
