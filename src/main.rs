@@ -12,8 +12,32 @@ mod workout_builder;
 use crate::coaching::Coach;
 use crate::db::Database;
 use crate::garmin_client::GarminClient;
+use clap::Parser;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+#[derive(Parser, Debug)]
+#[command(name = "fitness_journal", about = "Fitness Coach AI")]
+struct Cli {
+    #[arg(long, help = "Run as a background daemon calculating workloads every 24h")]
+    daemon: bool,
+    #[arg(long, help = "Start Signal bot listener")]
+    signal: bool,
+    #[arg(long, help = "Start the web dashboard REST API")]
+    api: bool,
+    #[arg(long, help = "Login to Garmin Connect globally")]
+    login: bool,
+    #[arg(long, help = "Test uploading a local JSON file to Garmin")]
+    test_upload: Option<String>,
+    #[arg(long, help = "Test fetching and printing a specific workout ID")]
+    test_fetch: Option<String>,
+    #[arg(long, help = "Test fetching an arbitrary Garmin URL")]
+    test_fetch_url: Option<String>,
+    #[arg(long, help = "Delete ALL previously generated AI workouts in Garmin")]
+    delete_workouts: bool,
+    #[arg(long, help = "Test force-refreshing OAuth2 Garmin tokens")]
+    test_refresh: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,12 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let coach = Arc::new(Coach::new());
 
-    let args: Vec<String> = std::env::args().collect();
-    let is_daemon = args.len() > 1 && args.contains(&"--daemon".to_string());
-    let is_signal = args.len() > 1 && args.contains(&"--signal".to_string());
-    let is_api = args.len() > 1 && args.contains(&"--api".to_string());
+    let args = Cli::parse();
+    let is_daemon = args.daemon;
+    let is_signal = args.signal;
+    let is_api = args.api;
 
-    if args.contains(&"--login".to_string()) {
+    if args.login {
         use std::io::{self, Write};
 
         print!("Garmin Email: ");
@@ -92,48 +116,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let garmin_client = Arc::new(GarminClient::new(database.clone()));
 
-    if let Some(pos) = args.iter().position(|a| a == "--test-upload") {
-        if let Some(file) = args.get(pos + 1) {
-            println!("Testing workout upload with file: {}", file);
-            let json_str = std::fs::read_to_string(file)?;
-            let builder = crate::workout_builder::WorkoutBuilder::new();
-            let parsed: serde_json::Value = serde_json::from_str(&json_str)?;
-            let payload = builder.build_workout_payload(&parsed, false);
-            match garmin_client
-                .api
-                .connectapi_post("/workout-service/workout", &payload)
-                .await
-            {
-                Ok(res) => println!("Success! Workout ID: {:?}", res.get("workoutId")),
-                Err(e) => println!("Failed to create workout: {}", e),
-            }
+    if let Some(file) = args.test_upload {
+        println!("Testing workout upload with file: {}", file);
+        let json_str = std::fs::read_to_string(&file)?;
+        let builder = crate::workout_builder::WorkoutBuilder::new();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str)?;
+        let payload = builder.build_workout_payload(&parsed, false);
+        match garmin_client
+            .api
+            .connectapi_post("/workout-service/workout", &payload)
+            .await
+        {
+            Ok(res) => println!("Success! Workout ID: {:?}", res.get("workoutId")),
+            Err(e) => println!("Failed to create workout: {}", e),
         }
     }
 
-    if let Some(pos) = args.iter().position(|a| a == "--test-fetch") {
-        if let Some(workout_id) = args.get(pos + 1) {
-            println!("Fetching workout ID '{}' from Garmin...", workout_id);
-            let endpoint = format!("/workout-service/workout/{}", workout_id);
-            match garmin_client.api.connectapi_get(&endpoint).await {
-                Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
-                Err(e) => println!("Failed: {}", e),
-            }
-            return Ok(());
+    if let Some(workout_id) = args.test_fetch {
+        println!("Fetching workout ID '{}' from Garmin...", workout_id);
+        let endpoint = format!("/workout-service/workout/{}", workout_id);
+        match garmin_client.api.connectapi_get(&endpoint).await {
+            Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
+            Err(e) => println!("Failed: {}", e),
         }
+        return Ok(());
     }
 
-    if let Some(pos) = args.iter().position(|a| a == "--test-fetch-url") {
-        if let Some(url) = args.get(pos + 1) {
-            println!("Fetching URL '{}' from Garmin...", url);
-            match garmin_client.api.connectapi_get(url).await {
-                Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
-                Err(e) => println!("Failed: {}", e),
-            }
-            return Ok(());
+    if let Some(url) = args.test_fetch_url {
+        println!("Fetching URL '{}' from Garmin...", url);
+        match garmin_client.api.connectapi_get(&url).await {
+            Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
+            Err(e) => println!("Failed: {}", e),
         }
+        return Ok(());
     }
 
-    if args.contains(&"--delete-workouts".to_string()) {
+    if args.delete_workouts {
         println!("Fetching workouts to delete...");
         match garmin_client.api.get_workouts().await {
             Ok(workouts) => {
@@ -164,13 +182,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if args.contains(&"--test-refresh".to_string()) {
+    if args.test_refresh {
         println!("Testing OAuth2 Token Refresh...");
         let temp_db = Arc::new(Mutex::new(
             Database::new().expect("Failed to initialize SQLite database"),
         ));
-        let garmin_client = crate::garmin_client::GarminClient::new(temp_db);
-        match garmin_client.api.refresh_oauth2().await {
+        let garmin_client_refresh = crate::garmin_client::GarminClient::new(temp_db);
+        match garmin_client_refresh.api.refresh_oauth2().await {
             Ok(_) => println!("Successfully refreshed token!"),
             Err(e) => println!("Failed to refresh: {}", e),
         }

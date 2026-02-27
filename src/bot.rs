@@ -39,8 +39,13 @@ impl BotController {
     pub async fn run(&self) {
         println!("Starting Signal Bot... connecting to signal-cli-rest-api WS...");
 
-        let signal_number =
-            std::env::var("SIGNAL_PHONE_NUMBER").unwrap_or_else(|_| "+1234567890".to_string());
+        let signal_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
+            Ok(n) if !n.trim().is_empty() => n,
+            _ => {
+                eprintln!("CRITICAL: SIGNAL_PHONE_NUMBER environment variable is missing but bot was started. Exiting bot loop.");
+                return;
+            }
+        };
 
         // Use environment variable for the host, defaulting to the docker-compose service name
         let api_host = std::env::var("SIGNAL_API_HOST")
@@ -243,10 +248,17 @@ impl BotController {
     }
 
     async fn send_reply(&self, recipient: &str, text: &str) {
+        let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
+            Ok(n) if !n.trim().is_empty() => n,
+            _ => {
+                eprintln!("Warning: SIGNAL_PHONE_NUMBER not set. Cannot send reply.");
+                return;
+            }
+        };
+
         let send_req = SendMessageReq {
             message: text.to_string(),
-            number: std::env::var("SIGNAL_PHONE_NUMBER")
-                .unwrap_or_else(|_| "+1234567890".to_string()),
+            number: phone_number,
             recipients: vec![recipient.to_string()],
         };
 
@@ -292,11 +304,18 @@ pub async fn broadcast_message(text: &str) {
     if recipients.is_empty() {
         return;
     }
+    
+    let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
+        Ok(n) if !n.trim().is_empty() => n,
+        _ => {
+            eprintln!("Warning: SIGNAL_PHONE_NUMBER not set. Skipping broadcast.");
+            return;
+        }
+    };
 
     let send_req = SendMessageReq {
         message: text.to_string(),
-        number: std::env::var("SIGNAL_PHONE_NUMBER")
-            .unwrap_or_else(|_| "+1234567890".to_string()),
+        number: phone_number,
         recipients,
     };
 
