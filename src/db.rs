@@ -375,4 +375,37 @@ impl Database {
         self.conn.execute("DELETE FROM kv_store WHERE key = 'garmin_cache'", [])?;
         Ok(())
     }
+
+    pub fn get_predicted_duration(&self, cache_key: &str) -> Result<Option<i32>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT value FROM kv_store WHERE key = ?1")?;
+        let key = format!("pred_dur:{}", cache_key);
+        let mut rows = stmt.query([key])?;
+        if let Some(row) = rows.next()? {
+            let value: String = row.get(0)?;
+            if let Ok(duration) = value.parse::<i32>() {
+                return Ok(Some(duration));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn set_predicted_duration(&self, cache_key: &str, duration: i32) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let key = format!("pred_dur:{}", cache_key);
+        let value = duration.to_string();
+        self.conn.execute(
+            "INSERT INTO kv_store (key, value, updated_at) 
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET 
+             value = excluded.value, 
+             updated_at = excluded.updated_at",
+            params![key, value, now],
+        )?;
+        Ok(())
+    }
 }

@@ -122,6 +122,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if let Some(pos) = args.iter().position(|a| a == "--test-fetch-url") {
+        if let Some(url) = args.get(pos + 1) {
+            println!("Fetching URL '{}' from Garmin...", url);
+            match garmin_client.api.connectapi_get(url).await {
+                Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
+                Err(e) => println!("Failed: {}", e),
+            }
+            return Ok(());
+        }
+    }
+
     if args.contains(&"--delete-workouts".to_string()) {
         println!("Fetching workouts to delete...");
         match garmin_client.api.get_workouts().await {

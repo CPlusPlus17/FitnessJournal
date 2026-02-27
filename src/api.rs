@@ -39,6 +39,13 @@ pub struct ChatInput {
     pub content: String,
 }
 
+#[derive(Deserialize)]
+pub struct PredictDurationInput {
+    pub title: Option<String>,
+    pub sport: Option<String>,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProfileConfigPayload {
@@ -373,6 +380,7 @@ pub async fn run_server(
         .route("/api/workouts/today", get(get_today_workouts))
         .route("/api/workouts/upcoming", get(get_upcoming_workouts))
         .route("/api/generate", axum::routing::post(trigger_generate))
+        .route("/api/predict_duration", axum::routing::post(predict_duration))
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
         .route("/api/profiles", get(get_profiles).put(update_profiles))
@@ -700,4 +708,60 @@ async fn update_profiles(
         "status": "success",
         "message": "Profiles updated"
     })))
+}
+
+async fn predict_duration(
+    State(state): State<ApiState>,
+    Json(input): Json<PredictDurationInput>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let title = input.title.unwrap_or_default();
+    let sport = input.sport.unwrap_or_default();
+    let cache_key = format!("{}|{}", title, sport);
+
+    {
+        let db = state.database.lock().await;
+        if let Ok(Some(duration)) = db.get_predicted_duration(&cache_key) {
+            return Ok(Json(serde_json::json!({ "duration": duration })));
+        }
+    }
+
+    let gemini_key = match std::env::var("GEMINI_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": "GEMINI_API_KEY not configured"
+                })),
+            ))
+        }
+    };
+
+    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+    let prompt = format!(
+        "Predict the duration in minutes for this workout. Take into account conventional durations for these types of workouts. Return only a plain integer representing minutes, and nothing else (no units, no markdown). If you cannot predict or it's unknown, return 45.\nTitle: {}\nSport: {}\nDescription: {}",
+        title, sport, input.description.unwrap_or_default()
+    );
+
+    match ai_client.generate_workout(&prompt).await {
+        Ok(text) => {
+            let parsed = text.trim().parse::<i32>().unwrap_or(45);
+            {
+                let db = state.database.lock().await;
+                let _ = db.set_predicted_duration(&cache_key, parsed);
+            }
+            
+            Ok(Json(serde_json::json!({
+                "duration": parsed
+            })))
+        },
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            })),
+        )),
+    }
 }

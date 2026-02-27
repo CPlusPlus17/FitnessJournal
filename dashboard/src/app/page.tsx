@@ -47,6 +47,38 @@ type PlannedWorkout = {
   description?: string;
 };
 
+async function estimateDuration(workout: PlannedWorkout): Promise<number | undefined> {
+  if (workout.duration) return workout.duration;
+
+  const isRace = workout.is_race === true || workout.type === 'race' || workout.type === 'event' || workout.type === 'primaryEvent';
+  const isPrimary = workout.primary_event === true || workout.type === 'primaryEvent';
+  const isRunning = (workout.sport || workout.type || "").toLowerCase().includes('run');
+
+  if (isRace || isPrimary || isRunning) {
+    return undefined;
+  }
+
+  try {
+    const res = await backendFetch(`/api/predict_duration`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: workout.title || workout.name || "",
+        sport: workout.sport || workout.type || "",
+        description: workout.description || ""
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.duration) return data.duration;
+    }
+  } catch (err) {
+    console.error("Failed to predict duration", err);
+  }
+
+  return undefined;
+}
+
 const FITNESS_API_BASE_URL = (process.env.FITNESS_API_BASE_URL || 'http://fitness-api:3001').replace(/\/+$/, '');
 const FITNESS_API_TOKEN = process.env.FITNESS_API_TOKEN || process.env.API_AUTH_TOKEN;
 
@@ -58,7 +90,7 @@ async function backendFetch(path: string, init: RequestInit = {}): Promise<Respo
   return fetch(`${FITNESS_API_BASE_URL}${path}`, {
     ...init,
     headers,
-    cache: 'no-store',
+    cache: 'force-cache',
   });
 }
 
@@ -234,14 +266,28 @@ export default async function Dashboard() {
 
   const activePlannedWorkouts = todayWorkouts.planned.filter((w: PlannedWorkout) => !isWorkoutDone(w));
 
+  const activePlannedWorkoutsWithPrediction = await Promise.all(
+    activePlannedWorkouts.map(async (workout: PlannedWorkout) => {
+      const estDur = await estimateDuration(workout);
+      return { ...workout, estDur };
+    })
+  );
+
   // Filter upcoming workouts: if they are planned for today, check if they are done
   const todayDates = new Set(todayWorkouts.planned.map((w: PlannedWorkout) => w.date));
-  const activeUpcomingWorkouts = upcomingWorkouts.filter((w: PlannedWorkout) => {
+  const activeUpcomingWorkoutsRaw = upcomingWorkouts.filter((w: PlannedWorkout) => {
     if (todayDates.has(w.date)) {
       return !isWorkoutDone(w);
     }
     return true;
   });
+
+  const activeUpcomingWorkoutsWithPrediction = await Promise.all(
+    activeUpcomingWorkoutsRaw.map(async (workout: PlannedWorkout) => {
+      const estDur = await estimateDuration(workout);
+      return { ...workout, estDur };
+    })
+  );
 
   return (
     <main className="min-h-screen p-8 md:p-24 selection:bg-red-500 selection:text-white pb-32">
@@ -346,21 +392,31 @@ export default async function Dashboard() {
                   {todayWorkouts.planned.length > 0 ? "All planned workouts completed for today! ✅" : "No workouts planned for today."}
                 </div>
               </div>
-            ) : activePlannedWorkouts.map((workout: PlannedWorkout, idx: number) => (
-              <div key={idx} className="glass-panel p-5 group relative border border-indigo-500/20">
-                <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="flex justify-between items-start mb-2">
-                  <h4 className="text-white font-medium">{workout.title || workout.description || "Training"}</h4>
-                  <span className="text-xs px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full">{workout.type || workout.sport || "Workout"}</span>
-                </div>
-                {(workout.duration || workout.distance) ? (
-                  <div className="mt-4 flex items-center gap-4 text-sm text-gray-400">
-                    {workout.duration ? <span>{workout.duration.toFixed(0)} min</span> : null}
-                    {workout.distance ? <span>{workout.distance.toFixed(1)} km</span> : null}
+            ) : activePlannedWorkoutsWithPrediction.map((workout, idx: number) => {
+              const estDur = workout.estDur;
+              const isEstimated = !workout.duration && !!estDur;
+              const displayDur = workout.duration || estDur;
+
+              return (
+                <div key={idx} className="glass-panel p-5 group relative border border-indigo-500/20">
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="flex justify-between items-start mb-2">
+                    <h4 className="text-white font-medium">{workout.title || workout.description || "Training"}</h4>
+                    <span className="text-xs px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full">{workout.type || workout.sport || "Workout"}</span>
                   </div>
-                ) : null}
-              </div>
-            ))}
+                  {(displayDur || workout.distance) ? (
+                    <div className="mt-4 flex items-center gap-4 text-sm text-gray-400">
+                      {displayDur ? (
+                        <span className={isEstimated ? "text-indigo-400/80" : ""}>
+                          {isEstimated && <span title="Predicted duration">✨ ~</span>}{displayDur.toFixed(0)} min
+                        </span>
+                      ) : null}
+                      {workout.distance ? <span>{workout.distance.toFixed(1)} km</span> : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -370,13 +426,16 @@ export default async function Dashboard() {
             <h2 className="text-2xl font-bold tracking-tight text-purple-400">Upcoming Schedule</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {activeUpcomingWorkouts.length === 0 ? (
+            {activeUpcomingWorkoutsWithPrediction.length === 0 ? (
               <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700">
                 <div className="text-lg">No upcoming workouts planned.</div>
               </div>
-            ) : activeUpcomingWorkouts.map((workout: PlannedWorkout, idx: number) => {
+            ) : activeUpcomingWorkoutsWithPrediction.map((workout, idx: number) => {
               const isRace = workout.is_race === true || workout.type === 'race' || workout.type === 'event' || workout.type === 'primaryEvent';
               const isPrimary = workout.primary_event === true || workout.type === 'primaryEvent';
+              const estDur = workout.estDur;
+              const isEstimated = !workout.duration && !!estDur;
+              const displayDur = workout.duration || estDur;
 
               let borderClass = "border-purple-500/20";
               let bgHoverClass = "from-purple-500/10";
@@ -413,9 +472,13 @@ export default async function Dashboard() {
                       {new Date(workout.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
                     </span>
                   </div>
-                  {(workout.duration || workout.distance) ? (
+                  {(displayDur || workout.distance) ? (
                     <div className="mt-4 flex items-center gap-4 text-sm text-gray-400">
-                      {workout.duration ? <span>{workout.duration.toFixed(0)} min</span> : null}
+                      {displayDur ? (
+                        <span className={isEstimated ? "text-purple-400/80" : ""}>
+                          {isEstimated && <span title="Predicted duration">✨ ~</span>}{displayDur.toFixed(0)} min
+                        </span>
+                      ) : null}
                       {workout.distance ? <span>{workout.distance.toFixed(1)} km</span> : null}
                     </div>
                   ) : null}
