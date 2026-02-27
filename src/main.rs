@@ -452,6 +452,11 @@ pub async fn run_coach_pipeline(
             println!("Warning: failed to clear AI chat log: {}", e);
         }
 
+        println!("Wiping previous coach briefs...");
+        if let Err(e) = database.lock().await.clear_coach_briefs() {
+            println!("Warning: failed to clear coach briefs: {}", e);
+        }
+
         match ai_client.generate_workout(&brief).await {
             Ok(markdown_response) => {
                 println!("Received response from AI!");

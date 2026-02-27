@@ -180,6 +180,11 @@ impl Database {
         Ok(())
     }
 
+    pub fn clear_coach_briefs(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM coach_briefs", [])?;
+        Ok(())
+    }
+
     pub fn get_coach_briefs(&self) -> Result<Vec<(String, String, u64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT prompt, response, created_at FROM (
