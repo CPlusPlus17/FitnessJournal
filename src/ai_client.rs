@@ -125,18 +125,37 @@ impl AiClient {
         Err(anyhow!("No valid content returned from Gemini"))
     }
 
-    pub async fn chat_with_history(&self, history: &[(String, String, u64)]) -> Result<String> {
+    pub async fn chat_with_history(
+        &self,
+        history: &[(String, String, u64)],
+        context: Option<&str>,
+    ) -> Result<String> {
         let mut contents = Vec::new();
         for (role, text, _) in history {
+            // Map the role string to the Gemini format 'user' or 'model'
+            let gemini_role = if role.to_lowercase() == "user" {
+                "user"
+            } else {
+                "model"
+            };
             contents.push(Content {
-                role: role.clone(),
+                role: gemini_role.to_string(),
                 parts: vec![Part { text: text.clone() }],
             });
         }
 
+        let mut sys_instruction = "You are an elite Multi-Sport Coach. Follow instructions precisely. The user is asking questions about the generated workout plan, their Garmin health metrics, or fitness in general. You will respond as the coach in a friendly and conversational, yet brief manner.\nIf you decide to actively add or reschedule a workout for the athlete, YOU MUST output a raw JSON codeblock starting with ```json containing an array of Garmin workout objects. Use the exact formats expected representing phase, exercise, weight, sets, reps etc.\nALWAYS reply with natural conversation along with the json block if adding a workout.".to_string();
+
+        if let Some(ctx) = context {
+            sys_instruction.push_str("\n\n=== LIVE ATHLETE CONTEXT ===\n");
+            sys_instruction.push_str(ctx);
+        }
+
         let request_body = GeminiRequest {
             system_instruction: Some(SystemInstruction {
-                parts: vec![Part { text: "You are an elite Multi-Sport Coach. Follow instructions precisely. The user may ask questions about the generated workout plan, or fitness. You will respond as the coach.".to_string() }]
+                parts: vec![Part {
+                    text: sys_instruction,
+                }],
             }),
             contents,
             generation_config: Some(GenerationConfig {

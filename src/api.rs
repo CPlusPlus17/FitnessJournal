@@ -537,7 +537,7 @@ async fn post_chat(
         .get_ai_chat_history()
         .unwrap_or_default();
 
-    match ai_client.chat_with_history(&history).await {
+    match ai_client.chat_with_history(&history, None).await {
         Ok(response) => {
             let db = state.database.lock().await;
             if let Err(e) = db.add_ai_chat_message("model", &response) {

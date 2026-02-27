@@ -67,6 +67,15 @@ impl Database {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS coach_briefs (
+                id INTEGER PRIMARY KEY,
+                created_at INTEGER NOT NULL,
+                prompt TEXT NOT NULL,
+                response TEXT NOT NULL
+            )",
+            [],
+        )?;
 
         Ok(Database { conn })
     }
@@ -143,6 +152,32 @@ impl Database {
         }
 
         Ok(history)
+    }
+
+    pub fn add_coach_brief(&self, prompt: &str, response: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+            
+        let safe_prompt: String = prompt.chars().take(MAX_CHAT_MESSAGE_LEN).collect();
+        let safe_response: String = response.chars().take(MAX_CHAT_MESSAGE_LEN).collect();
+        
+        self.conn.execute(
+            "INSERT INTO coach_briefs (created_at, prompt, response) VALUES (?1, ?2, ?3)",
+            params![now, safe_prompt, safe_response],
+        )?;
+        
+        // Keep only top 50 briefs to avoid massive db bloat since they are huge
+        self.conn.execute(
+            "DELETE FROM coach_briefs 
+             WHERE id NOT IN (
+                SELECT id FROM coach_briefs ORDER BY id DESC LIMIT 50
+             )",
+            [],
+        )?;
+        
+        Ok(())
     }
 
     pub fn insert_activity(&self, activity: &GarminActivity) -> Result<()> {

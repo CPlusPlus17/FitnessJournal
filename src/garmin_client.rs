@@ -341,4 +341,72 @@ impl GarminClient {
         }
         Ok(())
     }
+
+    pub async fn create_and_schedule_workout(
+        &self,
+        workout_spec: &serde_json::Value,
+    ) -> Result<String> {
+        let builder = crate::workout_builder::WorkoutBuilder::new();
+        let mut payload = builder.build_workout_payload(workout_spec, false);
+        let mut workout_id = None;
+        let mut msg = String::new();
+
+        match self
+            .api
+            .connectapi_post("/workout-service/workout", &payload)
+            .await
+        {
+            Ok(res) => {
+                if let Some(id) = res.get("workoutId").and_then(|i| i.as_i64()) {
+                    workout_id = Some(id);
+                    msg.push_str(&format!("Created Workout ID: {}. ", id));
+                }
+            }
+            Err(e) => {
+                if e.to_string().contains("400") {
+                    payload = builder.build_workout_payload(workout_spec, true);
+                    match self
+                        .api
+                        .connectapi_post("/workout-service/workout", &payload)
+                        .await
+                    {
+                        Ok(res) => {
+                            if let Some(id) = res.get("workoutId").and_then(|i| i.as_i64()) {
+                                workout_id = Some(id);
+                                msg.push_str(&format!("Created (Generic) Workout ID: {}. ", id));
+                            }
+                        }
+                        Err(e2) => {
+                            return Err(anyhow::anyhow!("Failed to create generic workout: {}", e2))
+                        }
+                    }
+                } else {
+                    return Err(anyhow::anyhow!("Failed to create workout: {}", e));
+                }
+            }
+        }
+
+        if let (Some(id), Some(sch_date)) = (
+            workout_id,
+            workout_spec.get("scheduledDate").and_then(|d| d.as_str()),
+        ) {
+            let sched_payload = serde_json::json!({ "date": sch_date });
+            let sched_endpoint = format!("/workout-service/schedule/{}", id);
+            match self
+                .api
+                .connectapi_post(&sched_endpoint, &sched_payload)
+                .await
+            {
+                Ok(_) => {
+                    msg.push_str(&format!("Successfully scheduled on {}.", sch_date));
+                    Ok(msg)
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to schedule: {}", e)),
+            }
+        } else {
+            Err(anyhow::anyhow!(
+                "Could not schedule: missing workout id or date."
+            ))
+        }
+    }
 }

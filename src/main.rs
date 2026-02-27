@@ -449,23 +449,12 @@ pub async fn run_coach_pipeline(
             println!("Warning: failed to clear AI chat log: {}", e);
         }
 
-        if let Err(e) = database.lock().await.add_ai_chat_message("user", &brief) {
-            println!("Warning: failed to insert brief to AI chat log: {}", e);
-        }
-
         match ai_client.generate_workout(&brief).await {
             Ok(markdown_response) => {
                 println!("Received response from AI!");
-
-                if let Err(e) = database
-                    .lock()
-                    .await
-                    .add_ai_chat_message("model", &markdown_response)
-                {
-                    println!(
-                        "Warning: failed to insert AI response to AI chat log: {}",
-                        e
-                    );
+                
+                if let Err(e) = database.lock().await.add_coach_brief(&brief, &markdown_response) {
+                    println!("Warning: failed to save coach brief to db: {}", e);
                 }
 
                 match crate::ai_client::AiClient::extract_json_block(&markdown_response) {
@@ -508,90 +497,25 @@ pub async fn run_coach_pipeline(
                                 );
                             }
 
-                            if let Some(name) =
-                                workout_spec.get("workoutName").and_then(|n| n.as_str())
-                            {
-                                println!("Creating workout: {}...", name);
-                            }
-
-                            let mut payload = builder.build_workout_payload(&workout_spec, false);
-                            let mut workout_id = None;
-
-                            // Trying normal payload
                             match garmin_client
-                                .api
-                                .connectapi_post("/workout-service/workout", &payload)
+                                .create_and_schedule_workout(&workout_spec)
                                 .await
                             {
-                                Ok(res) => {
-                                    println!("Garmin create response: {}", res);
-                                    if let Some(id) = res.get("workoutId").and_then(|i| i.as_i64())
-                                    {
-                                        workout_id = Some(id);
-                                        println!("Success! Workout ID: {}", id);
-                                    } else {
-                                        println!("Warning: workoutId not found in response.");
-                                    }
+                                Ok(msg) => {
+                                    println!("{}", msg);
+                                    let sch_date = workout_spec
+                                        .get("scheduledDate")
+                                        .and_then(|d| d.as_str())
+                                        .unwrap_or("Unknown Date");
+                                    generated_count += 1;
+                                    let detailed_str =
+                                        crate::bot::format_workout_details(&workout_spec);
+                                    scheduled_details.push(format!(
+                                        "📅 Scheduled for: {}\n{}",
+                                        sch_date, detailed_str
+                                    ));
                                 }
-                                Err(e) => {
-                                    if e.to_string().contains("400") {
-                                        println!("Failed with CSV mapping (400). Retrying with generic fallback...");
-                                        payload =
-                                            builder.build_workout_payload(&workout_spec, true);
-                                        match garmin_client
-                                            .api
-                                            .connectapi_post("/workout-service/workout", &payload)
-                                            .await
-                                        {
-                                            Ok(res) => {
-                                                println!("Garmin generic create response: {}", res);
-                                                if let Some(id) =
-                                                    res.get("workoutId").and_then(|i| i.as_i64())
-                                                {
-                                                    workout_id = Some(id);
-                                                    println!(
-                                                        "Success! (Generic Mode) Workout ID: {}",
-                                                        id
-                                                    );
-                                                } else {
-                                                    println!("Warning: workoutId not found in generic response.");
-                                                }
-                                            }
-                                            Err(e2) => println!(
-                                                "Failed to create workout (even generic): {}",
-                                                e2
-                                            ),
-                                        }
-                                    } else {
-                                        println!("Failed to create workout: {}", e);
-                                    }
-                                }
-                            }
-
-                            if let (Some(id), Some(sch_date)) = (
-                                workout_id,
-                                workout_spec.get("scheduledDate").and_then(|d| d.as_str()),
-                            ) {
-                                println!("Scheduling workout {} on {}...", id, sch_date);
-                                let sched_payload = serde_json::json!({ "date": sch_date });
-                                let sched_endpoint = format!("/workout-service/schedule/{}", id);
-                                match garmin_client
-                                    .api
-                                    .connectapi_post(&sched_endpoint, &sched_payload)
-                                    .await
-                                {
-                                    Ok(_) => {
-                                        println!("Successfully scheduled on {}", sch_date);
-                                        generated_count += 1;
-                                        let detailed_str =
-                                            crate::bot::format_workout_details(&workout_spec);
-                                        scheduled_details.push(format!(
-                                            "📅 Scheduled for: {}\n{}",
-                                            sch_date, detailed_str
-                                        ));
-                                    }
-                                    Err(e) => println!("Failed to schedule: {}", e),
-                                }
+                                Err(e) => println!("{}", e),
                             }
                         }
 

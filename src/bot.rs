@@ -166,10 +166,138 @@ impl BotController {
 
                             let response = self.handle_command(cmd, args).await;
                             self.send_reply(&msg_sender, &response).await;
+                        } else {
+                            // Conversational Logic
+                            let response = self.handle_conversation(text_trim).await;
+                            self.send_reply(&msg_sender, &response).await;
                         }
                     }
                 }
             }
+        }
+    }
+
+    async fn handle_conversation(&self, text: &str) -> String {
+        let gemini_key = match std::env::var("GEMINI_API_KEY") {
+            Ok(k) if !k.is_empty() => k,
+            _ => return "I cannot respond contextually without a GEMINI_API_KEY.".to_string(),
+        };
+
+        // 1. Fetch live context silently
+        let mut context_str = String::new();
+        if let Ok(data) = self.garmin_client.fetch_data().await {
+            let bb = data
+                .recovery_metrics
+                .as_ref()
+                .and_then(|m| m.current_body_battery)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+            let sleep = data
+                .recovery_metrics
+                .as_ref()
+                .and_then(|m| m.sleep_score)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let today_workouts: Vec<_> = data
+                .scheduled_workouts
+                .iter()
+                .filter(|w| w.date.starts_with(&today))
+                .collect();
+
+            let planned_str = if today_workouts.is_empty() {
+                "None - Rest Day!".to_string()
+            } else {
+                today_workouts
+                    .iter()
+                    .map(|w| {
+                        format!(
+                            "{} ({})",
+                            w.title.as_deref().unwrap_or("Untitled"),
+                            w.sport.as_deref().unwrap_or("Unknown")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+
+            context_str = format!(
+                "Body Battery: {}\nSleep Score: {}\nToday's Planned Workouts: {}",
+                bb, sleep, planned_str
+            );
+        }
+
+        let ai_client = crate::ai_client::AiClient::new(gemini_key);
+
+        {
+            let db = self.database.lock().await;
+            let _ = db.add_ai_chat_message("user", text);
+        }
+
+        let history = {
+            let db = self.database.lock().await;
+            db.get_ai_chat_history().unwrap_or_default()
+        };
+
+        match ai_client
+            .chat_with_history(&history, Some(&context_str))
+            .await
+        {
+            Ok(response) => {
+                {
+                    let db = self.database.lock().await;
+                    let _ = db.add_ai_chat_message("model", &response);
+                }
+
+                // Scan for JSON code block indicating a reschedule
+                if let Ok(json_str) = crate::ai_client::AiClient::extract_json_block(&response) {
+                    if let Ok(workouts) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str)
+                    {
+                        for workout_spec in workouts {
+                            crate::workout_builder::WorkoutBuilder::new()
+                                .build_workout_payload(&workout_spec, true);
+                            match self
+                                .garmin_client
+                                .create_and_schedule_workout(&workout_spec)
+                                .await
+                            {
+                                Ok(msg) => {
+                                    println!("Conversational Coach Scheduled Workout: {}", msg)
+                                }
+                                Err(e) => {
+                                    eprintln!("Conversational Coach failed to schedule: {}", e)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Strip the exact markdown json block from the response before sending it
+                let clean_response = if let Some(start_idx) = response.find("```json") {
+                    if let Some(end_idx) = response[start_idx..]
+                        .find("```\n")
+                        .or_else(|| response[start_idx..].find("```"))
+                    {
+                        let full_end = start_idx + end_idx + 3;
+                        let mut cleaned = response.clone();
+                        // Also remove a trailing newline if it exists right after the block
+                        if cleaned.len() > full_end && cleaned.as_bytes()[full_end] == b'\n' {
+                            cleaned.replace_range(start_idx..=full_end, "");
+                        } else {
+                            cleaned.replace_range(start_idx..full_end, "");
+                        }
+                        cleaned.trim().to_string()
+                    } else {
+                        response
+                    }
+                } else {
+                    response
+                };
+
+                clean_response
+            }
+            Err(e) => format!("My coaching brain failed to connect: {}", e),
         }
     }
 
