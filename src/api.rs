@@ -458,12 +458,17 @@ async fn trigger_generate(
 
 async fn get_chat(State(state): State<ApiState>) -> Json<Vec<ChatMessage>> {
     let db = state.database.lock().await;
-    let history = db.get_ai_chat_history().unwrap_or_default();
-    let mut resp = Vec::with_capacity(history.len());
-    for (role, content, created_at) in history {
+    let history = db.get_coach_briefs().unwrap_or_default();
+    let mut resp = Vec::with_capacity(history.len() * 2);
+    for (prompt, response, created_at) in history {
         resp.push(ChatMessage {
-            role,
-            content,
+            role: "user".to_string(),
+            content: prompt,
+            created_at,
+        });
+        resp.push(ChatMessage {
+            role: "model".to_string(),
+            content: response,
             created_at,
         });
     }
@@ -517,30 +522,29 @@ async fn post_chat(
 
     let ai_client = crate::ai_client::AiClient::new(gemini_key);
 
-    {
-        let db = state.database.lock().await;
-        if let Err(e) = db.add_ai_chat_message("user", content) {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Failed to save input: {}", e)
-                })),
-            ));
-        }
-    }
-
-    let history = state
+    let history_pairs = state
         .database
         .lock()
         .await
-        .get_ai_chat_history()
+        .get_coach_briefs()
         .unwrap_or_default();
+
+    let mut history = Vec::with_capacity(history_pairs.len() * 2 + 1);
+    for (prompt, response, created_at) in history_pairs {
+        history.push(("user".to_string(), prompt, created_at));
+        history.push(("model".to_string(), response, created_at));
+    }
+    
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    history.push(("user".to_string(), content.to_string(), now));
 
     match ai_client.chat_with_history(&history, None).await {
         Ok(response) => {
             let db = state.database.lock().await;
-            if let Err(e) = db.add_ai_chat_message("model", &response) {
+            if let Err(e) = db.add_coach_brief(content, &response) {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({

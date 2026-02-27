@@ -82,6 +82,15 @@ export default function Chat() {
             </h3>
 
             <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 z-10 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                {messages.length === 0 && !loading && (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 space-y-2 mt-10">
+                        <svg className="w-12 h-12 text-indigo-500/50 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        <p>No messages yet.</p>
+                        <p className="text-sm">Say hi to your AI Coach to get started!</p>
+                    </div>
+                )}
                 {messages.map((msg, idx) => (
                     <div key={idx} className={`p-4 rounded-2xl max-w-[90%] ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 ml-auto border border-indigo-500/30' : 'bg-black/40 text-gray-300 border border-white/10'}`}>
                         <div className="text-xs text-gray-500 mb-2 tracking-wider flex justify-between items-center whitespace-nowrap gap-4">

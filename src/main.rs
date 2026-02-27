@@ -223,6 +223,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if is_daemon {
         println!("Starting Fitness Coach in DAEMON mode. Will run every 24 hours.");
         crate::bot::start_morning_notifier(garmin_client.clone());
+        if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
+            crate::bot::start_weekly_review_notifier(garmin_client.clone(), gemini_key);
+        }
         loop {
             run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
             println!("Sleeping for 24 hours... zzz");
@@ -452,8 +455,12 @@ pub async fn run_coach_pipeline(
         match ai_client.generate_workout(&brief).await {
             Ok(markdown_response) => {
                 println!("Received response from AI!");
-                
-                if let Err(e) = database.lock().await.add_coach_brief(&brief, &markdown_response) {
+
+                if let Err(e) = database
+                    .lock()
+                    .await
+                    .add_coach_brief(&brief, &markdown_response)
+                {
                     println!("Warning: failed to save coach brief to db: {}", e);
                 }
 

@@ -606,3 +606,117 @@ pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
         }
     });
 }
+
+pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, gemini_key: String) {
+    tokio::spawn(async move {
+        let mut last_sent_week = String::new();
+
+        loop {
+            let now = chrono::Local::now();
+            let today_str = now.format("%Y-%m-%d").to_string();
+            // Get week representation like "2026-W09" to ensure we only send once per week
+            let current_week = now.format("%G-W%V").to_string();
+
+            let target_day =
+                std::env::var("WEEKLY_REVIEW_DAY").unwrap_or_else(|_| "Sun".to_string());
+            let current_day = now.format("%a").to_string(); // e.g. "Sun"
+
+            let target_time =
+                std::env::var("WEEKLY_REVIEW_TIME").unwrap_or_else(|_| "18:00".to_string());
+            let current_time = now.format("%H:%M").to_string();
+
+            if current_day == target_day
+                && current_time == target_time
+                && last_sent_week != current_week
+            {
+                match garmin_client.fetch_data().await {
+                    Ok(data) => {
+                        let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+                        let seven_days_ago = now - chrono::Duration::days(7);
+                        let seven_days_ago_str = seven_days_ago.format("%Y-%m-%d").to_string();
+
+                        let recent_activities: Vec<_> = data
+                            .activities
+                            .iter()
+                            .filter(|a| a.start_time >= seven_days_ago_str)
+                            .collect();
+
+                        // Calculate basic Volume
+                        let total_duration_mins: f64 = recent_activities
+                            .iter()
+                            .filter_map(|a| a.duration)
+                            .sum::<f64>()
+                            / 60.0;
+                        let total_distance_km: f64 = recent_activities
+                            .iter()
+                            .filter_map(|a| a.distance)
+                            .sum::<f64>()
+                            / 1000.0;
+                        let act_count = recent_activities.len();
+
+                        // Build Prompt Context
+                        let mut context = format!(
+                            "Athlete's Weekly Summary\nTimeframe: {} to {}\nWorkouts Completed: {}\nTotal Duration: {:.1} mins\nTotal Distance: {:.1} km\n",
+                            seven_days_ago_str, today_str, act_count, total_duration_mins, total_distance_km
+                        );
+
+                        if let Some(metrics) = &data.recovery_metrics {
+                            let sleep = metrics
+                                .sleep_score
+                                .map_or("N/A".to_string(), |v| v.to_string());
+                            let bb = metrics
+                                .current_body_battery
+                                .map_or("N/A".to_string(), |v| v.to_string());
+                            let hrv = metrics.hrv_status.as_deref().unwrap_or("N/A");
+                            context.push_str(&format!("\nCurrent Recovery Stats:\nSleep Score: {}\nBody Battery: {}\nHRV Status: {}\n", sleep, bb, hrv));
+                        }
+
+                        let tomorrow = (now + chrono::Duration::days(1))
+                            .format("%Y-%m-%d")
+                            .to_string();
+                        let upcoming: Vec<_> = data
+                            .scheduled_workouts
+                            .iter()
+                            .filter(|w| w.date.starts_with(&tomorrow))
+                            .collect();
+
+                        if !upcoming.is_empty() {
+                            context.push_str("\nTomorrow's Schedule:\n");
+                            for w in upcoming {
+                                context.push_str(&format!(
+                                    "- {} ({})\n",
+                                    w.title.as_deref().unwrap_or("Workout"),
+                                    w.sport.as_deref().unwrap_or("unknown")
+                                ));
+                            }
+                        }
+
+                        let prompt = format!(
+                            "You are the athlete's elite performance coach. Review the following weekly summary of their Garmin data.\n\
+                            Write a highly encouraging, crisp, 2-3 paragraph weekly review to be sent on Signal. \n\
+                            Acknowledge their work volume, comment critically but kindly on any recovery trends (sleep, body battery), and give them a focal point for the upcoming week based on tomorrow's schedule.\n\
+                            Keep the tone professional, motivating, and conversational.\n\n\
+                            === WEEKLY DATA ===\n{}",
+                            context
+                        );
+
+                        match ai_client.generate_workout(&prompt).await {
+                            Ok(review) => {
+                                let msg = format!("📈 **Weekly Coach Review**\n\n{}", review);
+                                broadcast_message(&msg).await;
+                                last_sent_week = current_week;
+                            }
+                            Err(e) => eprintln!("Failed to generate weekly review from AI: {}", e),
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Weekly review notifier failed to fetch garmin data: {}", e);
+                    }
+                }
+            }
+
+            // Sleep for roughly a minute
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    });
+}

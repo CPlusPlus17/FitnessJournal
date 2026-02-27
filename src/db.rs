@@ -159,15 +159,15 @@ impl Database {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or_default();
-            
+
         let safe_prompt: String = prompt.chars().take(MAX_CHAT_MESSAGE_LEN).collect();
         let safe_response: String = response.chars().take(MAX_CHAT_MESSAGE_LEN).collect();
-        
+
         self.conn.execute(
             "INSERT INTO coach_briefs (created_at, prompt, response) VALUES (?1, ?2, ?3)",
             params![now, safe_prompt, safe_response],
         )?;
-        
+
         // Keep only top 50 briefs to avoid massive db bloat since they are huge
         self.conn.execute(
             "DELETE FROM coach_briefs 
@@ -176,8 +176,31 @@ impl Database {
              )",
             [],
         )?;
-        
+
         Ok(())
+    }
+
+    pub fn get_coach_briefs(&self) -> Result<Vec<(String, String, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT prompt, response, created_at FROM (
+                SELECT id, prompt, response, created_at
+                FROM coach_briefs
+                ORDER BY id DESC
+                LIMIT 50
+             )
+             ORDER BY id ASC",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut history = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            let prompt: String = row.get(0)?;
+            let response: String = row.get(1)?;
+            let created_at: u64 = row.get(2)?;
+            history.push((prompt, response, created_at));
+        }
+
+        Ok(history)
     }
 
     pub fn insert_activity(&self, activity: &GarminActivity) -> Result<()> {

@@ -375,14 +375,6 @@ export default async function Dashboard() {
           </div>
         </div>
 
-        <section className="space-y-6 mt-6">
-          <Chat />
-        </section>
-
-        <section className="space-y-6">
-          <MuscleMap />
-        </section>
-
         {/* Today's Planned Workouts */}
         <section className="space-y-6">
           <div className="flex items-center justify-between">
@@ -579,6 +571,14 @@ export default async function Dashboard() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section className="space-y-6 mt-6">
+          <Chat />
+        </section>
+
+        <section className="space-y-6">
+          <MuscleMap />
         </section>
       </div>
     </main>
