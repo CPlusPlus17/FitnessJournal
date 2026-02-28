@@ -1,5 +1,17 @@
 # Fitness Journal Coach
 
+<div align="center">
+  <img src="screenshots/dashboard_demo.webp" alt="Fitness Journal Dashboard Animated Demo" width="800"/>
+  <br/>
+  <em>Automated Walkthrough of the Live AI Coaching Dashboard</em>
+  <br/><br/>
+  <img src="screenshots/dashboard_overview.png" alt="Fitness Journal Dashboard Overview" width="800"/>
+  <br/>
+  <em>Live AI Coaching Dashboard with Garmin Hub Integration</em>
+  <br/><br/>
+  <img src="screenshots/muscle_heatmap.png" alt="AI Muscle Fatigue Heatmap" width="800"/>
+</div>
+
 > 🚨 **NOT A DEVELOPER?** Check out our **[Dummies Installation Guide](INSTALL_DUMMIES.md)** for a simple, step-by-step way to get set up without any coding knowledge!
 
 This project is an automated fitness coaching assistant. It fetches health and activity data from Garmin Connect, sleep and body battery metrics, and syncs past workouts to a local database. Using a large language model (Gemini 3.1 Pro), it generates weekly workout schedules tailored to your goals and automatically uploads them back to your Garmin calendar.

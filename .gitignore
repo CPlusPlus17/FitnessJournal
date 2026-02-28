@@ -13,3 +13,4 @@ fitness_journal.db
 profiles.json
 dump.json
 today.json
+.DS_Store
