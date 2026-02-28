@@ -277,7 +277,12 @@ pub async fn run_coach_pipeline(
         }
     };
 
-    // 2. Sync Garmin Strength Sets to Local Database & Fetch History
+    // 2. Save Recovery Metrics & Sync Garmin Strength Sets to Local Database & Fetch History
+    if let Some(ref metrics) = recovery {
+        if let Err(e) = database.lock().await.save_recovery_metrics(metrics) {
+            error!("Failed to save recovery metrics to DB: {}", e);
+        }
+    }
     let progression_history = sync_workouts_to_db(&detailed_activities, &database).await;
 
     // 3. Load Active Profile

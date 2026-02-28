@@ -7,6 +7,17 @@ const MAX_CHAT_MESSAGE_LEN: usize = 65_536;
 pub type TrendHistoryItem = (f64, i32, String);
 pub type ProgressionHistoryEntry = (String, f64, i32, String, Vec<TrendHistoryItem>);
 
+#[derive(serde::Serialize)]
+pub struct RecoveryHistoryEntry {
+    pub date: String,
+    pub body_battery: Option<i32>,
+    pub sleep_score: Option<i32>,
+    pub training_readiness: Option<i32>,
+    pub hrv_last_night_avg: Option<i32>,
+    pub hrv_status: Option<String>,
+    pub rhr: Option<i32>,
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -73,6 +84,19 @@ impl Database {
                 created_at INTEGER NOT NULL,
                 prompt TEXT NOT NULL,
                 response TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS recovery_metrics_history (
+                date TEXT PRIMARY KEY,
+                body_battery INTEGER,
+                sleep_score INTEGER,
+                training_readiness INTEGER,
+                hrv_last_night_avg INTEGER,
+                hrv_status TEXT,
+                rhr INTEGER
             )",
             [],
         )?;
@@ -513,5 +537,65 @@ impl Database {
             params![activity_id, date, summary],
         )?;
         Ok(())
+    }
+
+    pub fn save_recovery_metrics(
+        &self,
+        metrics: &crate::models::GarminRecoveryMetrics,
+    ) -> Result<()> {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let rhr = metrics.rhr_trend.last().copied();
+
+        self.conn.execute(
+            "INSERT INTO recovery_metrics_history (
+                date, body_battery, sleep_score, training_readiness, 
+                hrv_last_night_avg, hrv_status, rhr
+            ) 
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(date) DO UPDATE SET 
+                body_battery = excluded.body_battery,
+                sleep_score = excluded.sleep_score,
+                training_readiness = excluded.training_readiness,
+                hrv_last_night_avg = excluded.hrv_last_night_avg,
+                hrv_status = excluded.hrv_status,
+                rhr = excluded.rhr",
+            params![
+                today,
+                metrics.current_body_battery,
+                metrics.sleep_score,
+                metrics.training_readiness,
+                metrics.hrv_last_night_avg,
+                metrics.hrv_status,
+                rhr,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_recovery_history(&self, days: u32) -> Result<Vec<RecoveryHistoryEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date, body_battery, sleep_score, training_readiness, hrv_last_night_avg, hrv_status, rhr 
+             FROM recovery_metrics_history 
+             WHERE date >= date('now', ?1)
+             ORDER BY date ASC",
+        )?;
+
+        let modifier = format!("-{} days", days);
+        let mut rows = stmt.query(params![modifier])?;
+
+        let mut history = Vec::new();
+        while let Some(row) = rows.next()? {
+            history.push(RecoveryHistoryEntry {
+                date: row.get(0)?,
+                body_battery: row.get(1)?,
+                sleep_score: row.get(2)?,
+                training_readiness: row.get(3)?,
+                hrv_last_night_avg: row.get(4)?,
+                hrv_status: row.get(5)?,
+                rhr: row.get(6)?,
+            });
+        }
+
+        Ok(history)
     }
 }

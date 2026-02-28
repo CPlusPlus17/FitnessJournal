@@ -5,6 +5,7 @@ import MuscleMap from './MuscleMap';
 import Chat from './Chat';
 import AnalyzeButton from './AnalyzeButton';
 import ForcePullButton from './ForcePullButton';
+import RecoveryHistoryChart, { RecoveryHistoryEntry } from './RecoveryHistoryChart';
 
 export const dynamic = 'force-dynamic';
 
@@ -206,6 +207,19 @@ async function fetchRecovery(): Promise<RecoveryItem> {
   }
 }
 
+async function fetchRecoveryHistory(): Promise<RecoveryHistoryEntry[]> {
+  try {
+    const res = await backendFetch('/api/recovery/history');
+    if (!res.ok) {
+      return [];
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("Fetch failed for recovery history.", err);
+    return [];
+  }
+}
+
 type TodayWorkoutsResponse = {
   done: CompletedWorkout[];
   planned: PlannedWorkout[];
@@ -240,6 +254,7 @@ async function fetchUpcomingWorkouts(): Promise<PlannedWorkout[]> {
 export default async function Dashboard() {
   const data = await fetchProgression();
   const recovery = await fetchRecovery();
+  const recoveryHistory = await fetchRecoveryHistory();
   const todayWorkouts = await fetchTodayWorkouts();
   const upcomingWorkouts = await fetchUpcomingWorkouts();
 
@@ -374,6 +389,18 @@ export default async function Dashboard() {
             <GenerateButton />
           </div>
         </div>
+
+        {/* Recovery History Chart */}
+        {recoveryHistory && recoveryHistory.length > 0 && (
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold tracking-tight text-rose-400">Recovery Trends</h2>
+            </div>
+            <div className="glass-panel p-6 border border-rose-500/20">
+              <RecoveryHistoryChart data={recoveryHistory} />
+            </div>
+          </section>
+        )}
 
         {/* Today's Planned Workouts */}
         <section className="space-y-6">

@@ -390,6 +390,7 @@ pub async fn run_server(
     let app = Router::new()
         .route("/api/progression", get(get_progression))
         .route("/api/recovery", get(get_recovery))
+        .route("/api/recovery/history", get(get_recovery_history))
         .route("/api/workouts/today", get(get_today_workouts))
         .route("/api/workouts/upcoming", get(get_upcoming_workouts))
         .route("/api/force-pull", axum::routing::post(force_pull_data))
@@ -629,6 +630,13 @@ async fn get_recovery(State(state): State<ApiState>) -> Json<RecoveryResponse> {
     }
 
     Json(response)
+}
+
+async fn get_recovery_history(State(state): State<ApiState>) -> Json<Vec<crate::db::RecoveryHistoryEntry>> {
+    let db = state.database.lock().await;
+    // Fetch the last 30 days of recovery history to render on the dashboard charts
+    let history = db.get_recovery_history(30).unwrap_or_default();
+    Json(history)
 }
 
 async fn get_today_workouts(State(state): State<ApiState>) -> Json<TodayWorkoutsResponse> {
