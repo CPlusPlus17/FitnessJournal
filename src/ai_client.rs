@@ -37,6 +37,18 @@ struct Part {
 struct GeminiResponse {
     candidates: Option<Vec<Candidate>>,
     error: Option<GeminiError>,
+    #[serde(rename = "usageMetadata")]
+    usage_metadata: Option<UsageMetadata>,
+}
+
+#[derive(Deserialize)]
+struct UsageMetadata {
+    #[serde(rename = "promptTokenCount")]
+    prompt_token_count: i32,
+    #[serde(rename = "candidatesTokenCount")]
+    candidates_token_count: Option<i32>,
+    #[serde(rename = "totalTokenCount")]
+    total_token_count: i32,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +146,15 @@ impl AiClient {
             return Err(anyhow!("Gemini returned an error: {}", error.message));
         }
 
+        if let Some(usage) = &gemini_response.usage_metadata {
+            tracing::info!(
+                "Gemini API Token Usage - Prompt: {}, Output: {}, Total: {}",
+                usage.prompt_token_count,
+                usage.candidates_token_count.unwrap_or(0),
+                usage.total_token_count
+            );
+        }
+
         if let Some(candidates) = gemini_response.candidates {
             if let Some(candidate) = candidates.first() {
                 if let Some(part) = candidate.content.parts.first() {
@@ -211,6 +232,15 @@ impl AiClient {
 
         if let Some(error) = gemini_response.error {
             return Err(anyhow!("Gemini returned an error: {}", error.message));
+        }
+
+        if let Some(usage) = &gemini_response.usage_metadata {
+            tracing::info!(
+                "Gemini API Token Usage - Prompt: {}, Output: {}, Total: {}",
+                usage.prompt_token_count,
+                usage.candidates_token_count.unwrap_or(0),
+                usage.total_token_count
+            );
         }
 
         if let Some(candidates) = gemini_response.candidates {
