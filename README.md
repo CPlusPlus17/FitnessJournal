@@ -19,31 +19,35 @@ To run this application, you will need:
 
 ### 1. Environment Configuration
 
-Clone the repository and set up your core configuration files:
+Clone the repository and set up your core configuration files. The application uses `Fitness.toml` for configuration, supporting rich profile switching (e.g. `[default]`, `[dry_run]`).
 
-1. Create a `.env` file in the root directory:
-   ```env
-   # Your Gemini Configuration
-   GEMINI_API_KEY=your_gemini_api_key
+1. Create a `Fitness.toml` file in the root directory:
+   ```toml
+   [default]
+   # Security & API
+   api_auth_token = "change_me_to_a_long_random_value"
+   cors_allowed_origins = "http://localhost:3000"
+   api_bind_addr = "127.0.0.1:3001"
+   chat_rate_limit_per_minute = 30
+   generate_rate_limit_per_hour = 6
 
-   # The phone number the bot will use, including country code (e.g., +41796000000)
-   SIGNAL_PHONE_NUMBER=your_bot_phone_number
+   # AI Configuration
+   gemini_api_key = "your_gemini_api_key"
 
-   # Optional but recommended: protect the Rust API with a shared token.
-   # When set, every API request must include this token.
-   API_AUTH_TOKEN=change_me_to_a_long_random_value
-
-   # Optional: bind API host/port (defaults to 127.0.0.1:3001)
-   API_BIND_ADDR=127.0.0.1:3001
-
-   # Optional: comma-separated origins allowed by CORS (defaults to http://localhost:3000)
-   CORS_ALLOWED_ORIGINS=http://localhost:3000
-
-   # Optional dashboard admin credentials for /settings and /api/profiles.
-   # Defaults to username=admin and password fallback to FITNESS_API_TOKEN/API_AUTH_TOKEN.
-   DASHBOARD_ADMIN_USERNAME=admin
-   DASHBOARD_ADMIN_PASSWORD=change_me_to_a_second_long_random_value
+   # Signal Bot
+   signal_phone_number = "your_bot_phone_number"
+   signal_subscribers = "your_subscriber_number"
+   morning_message_time = "07:00"
    ```
+
+   **Migrating from `.env`:**
+   If you have an older `.env` file, you can automatically migrate by creating a `Fitness.toml` and transliterating your variables to lowercase under `[default]`. `Figment` will seamlessly absorb old `.env` files natively for fallback (unless it's a numeric string mapping issue), but `.toml` unlocks the true power of profiles allowing safe testing:
+   ```toml
+   [dry_run]
+   database_url = "fitness_journal_dry_run.db"
+   api_bind_addr = "127.0.0.1:3001"
+   ```
+   *(Note: `DASHBOARD_ADMIN_PASSWORD` can still be provided via `.env`)*
 
    **Note on Timezones:** By default, Docker containers run in UTC. If you want the `MORNING_MESSAGE_TIME` to trigger at your correct local time, you must add your timezone to the `fitness-coach` service in `docker-compose.yml`:
    ```yaml
@@ -199,3 +203,24 @@ This project was built with reference to the following open-source projects:
 - **[garth](https://github.com/matin/garth)** - Garmin SSO OAuth toolkit for Python, which heavily inspired our native Rust login implementation.
 - **[signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api)** - Dockerized REST API wrapper around `signal-cli` that powers our bot's communication with the Signal network.
 - **[react-body-highlighter](https://github.com/GV79/react-body-highlighter)** - React component used in the dashboard to visualize muscle fatigue on a human body graphic.
+
+## Changelog
+
+**Recent Features (Since `eda6f0f8d5dba6884c5784c94543d2325da0c3a1`)**
+- **Configuration**
+  - Implemented centralized configuration management using `figment` to load settings from a `Fitness.toml` file or environment variables, supporting `[dry_run]` profiles safely.
+- **Bot & Conversational AI**
+  - Conversational AI coach with live Garmin context, flexible workout scheduling, and chat history persistence.
+  - Enhanced bot context with recent activities, aligned Garmin daemon frequency to 5 minutes, and included AI analysis summaries.
+  - Implemented AI-powered automatic activity analysis and Signal broadcasts based on configured sports in user profiles.
+  - Improved bot message parsing for sender/destination and enhanced "note to self" message detection via UUIDs.
+  - Introduced daily morning workout briefings, post-generation workout summaries, and chat message timestamps.
+- **AI Assessments & Dashboards**
+  - Introduced AI-powered monthly debriefs and race readiness assessments with new bot commands and scheduled notifiers.
+  - Weekly AI coach review notification and coach brief history in the dashboard UI.
+  - Added recovery history chart to the dashboard, including new API endpoints and database storage for daily recovery metrics.
+  - Refined workout type extraction logic, replaced body highlighter library with `@mjcdev/react-body-highlighter`, and added gender selection to the muscle map.
+  - AI-powered workout duration prediction with API endpoints, database caching, and frontend UX enhancements.
+- **Refactoring & Tech Debt Checkups**
+  - Migrated CLI argument parsing to `clap` and replaced `println!` and `eprintln!` with `tracing` macros for structured logs.
+  - Improved workout parsing synchronization and enhanced SQLite initialization robustness.
