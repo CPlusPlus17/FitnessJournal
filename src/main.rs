@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 struct Cli {
     #[arg(
         long,
-        help = "Run as a background daemon calculating workloads every 24h"
+        help = "Run as a background daemon calculating workloads every 5min"
     )]
     daemon: bool,
     #[arg(long, help = "Start Signal bot listener")]
@@ -223,7 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if is_daemon {
-        info!("Starting Fitness Coach in DAEMON mode. Will run every 24 hours.");
+        info!("Starting Fitness Coach in DAEMON mode. Will run every 5 minutes.");
         crate::bot::start_morning_notifier(garmin_client.clone());
         if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
             crate::bot::start_weekly_review_notifier(garmin_client.clone(), gemini_key.clone());
@@ -232,8 +232,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         loop {
             run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
-            info!("Sleeping for 24 hours... zzz");
-            tokio::time::sleep(tokio::time::Duration::from_secs(86400)).await;
+            info!("Sleeping for 5 minutes... zzz");
+            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
         }
     } else {
         run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;

@@ -185,7 +185,9 @@ impl BotController {
         };
 
         // 1. Fetch live context silently
-        let mut context_str = String::new();
+        let now = chrono::Local::now();
+        let mut context_str = format!("Current Date: {}", now.format("%a, %Y-%m-%d %H:%M"));
+
         if let Ok(data) = self.garmin_client.fetch_data().await {
             let bb = data
                 .recovery_metrics
@@ -223,10 +225,10 @@ impl BotController {
                     .join(", ")
             };
 
-            context_str = format!(
-                "Body Battery: {}\nSleep Score: {}\nToday's Planned Workouts: {}",
+            context_str.push_str(&format!(
+                "\nBody Battery: {}\nSleep Score: {}\nToday's Planned Workouts: {}",
                 bb, sleep, planned_str
-            );
+            ));
 
             // Add recent activities to context
             let seven_days_ago = (chrono::Local::now() - chrono::Duration::days(7))
