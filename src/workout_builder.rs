@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use tracing::{info, error};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -87,7 +88,7 @@ impl WorkoutBuilder {
 
     fn load_exercise_db(&mut self, path: &str) {
         if !std::path::Path::new(path).exists() {
-            println!(
+            info!(
                 "Warning: Exercise DB CSV not found at {}. Using name as key.",
                 path
             );
@@ -151,12 +152,12 @@ impl WorkoutBuilder {
                     }
                 }
             }
-            println!(
+            info!(
                 "Loaded {} elements into exercise DB from CSV",
                 self.exercise_db.len()
             );
         } else {
-            println!("Warning: Could not read CSV at {}", path);
+            info!("Warning: Could not read CSV at {}", path);
         }
     }
 
@@ -196,7 +197,7 @@ impl WorkoutBuilder {
         if let Some(best_key) = best_match {
             if let Some(val) = self.exercise_db.get(&best_key) {
                 // If fuzzy match differs from exact clean input, log it for debugging
-                println!(
+                info!(
                     "Fuzzy match: '{}' -> '{}' (distance: {})",
                     name, best_key, best_distance
                 );

@@ -1,4 +1,5 @@
 use crate::models::*;
+use tracing::{info, error};
 use anyhow::{anyhow, Context, Result};
 use reqwest::{Client, Method, RequestBuilder};
 use serde::{Deserialize, Serialize};
@@ -174,28 +175,43 @@ impl GarminApi {
             )?;
         }
 
-        println!("Successfully refreshed Garmin OAuth2 Token natively!");
+        info!("Successfully refreshed Garmin OAuth2 Token natively!");
         Ok(())
     }
 
     /// Generic connectapi GET request
     pub async fn connectapi_get(&self, endpoint: &str) -> Result<serde_json::Value> {
-        if self.is_oauth2_expired().await {
-            self.refresh_oauth2().await?;
-        }
-        let url = format!("https://connectapi.garmin.com{}", endpoint);
-        let mut req = self.client.request(Method::GET, &url);
-        req = self.attach_oauth2(req).await;
+        let max_retries = 3;
+        for attempt in 1..=max_retries {
+            if self.is_oauth2_expired().await {
+                self.refresh_oauth2().await?;
+            }
+            let url = format!("https://connectapi.garmin.com{}", endpoint);
+            let mut req = self.client.request(Method::GET, &url);
+            req = self.attach_oauth2(req).await;
 
-        let res = req.send().await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = res.text().await.unwrap_or_default();
-            return Err(anyhow!("Garmin API returned {}: {}", status, text));
+            match req.send().await {
+                Ok(res) if res.status().is_success() => {
+                    return Ok(res.json().await?);
+                }
+                Ok(res) => {
+                    let status = res.status();
+                    let text = res.text().await.unwrap_or_default();
+                    if attempt == max_retries {
+                        return Err(anyhow!("Garmin API GET returned {}: {}", status, text));
+                    }
+                    tracing::warn!("Garmin API GET {} failed with {}: {}. Retrying {}/{}", endpoint, status, text, attempt, max_retries);
+                }
+                Err(e) => {
+                    if attempt == max_retries {
+                        return Err(anyhow::anyhow!("Garmin API GET request failed: {}", e));
+                    }
+                    tracing::warn!("Garmin API GET {} request failed: {}. Retrying {}/{}", endpoint, e, attempt, max_retries);
+                }
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(2 * attempt)).await;
         }
-
-        let json: serde_json::Value = res.json().await?;
-        Ok(json)
+        unreachable!()
     }
 
     /// Generic connectapi POST request
@@ -204,51 +220,81 @@ impl GarminApi {
         endpoint: &str,
         payload: &serde_json::Value,
     ) -> Result<serde_json::Value> {
-        if self.is_oauth2_expired().await {
-            self.refresh_oauth2().await?;
-        }
-        let url = format!("https://connectapi.garmin.com{}", endpoint);
-        let mut req = self.client.request(Method::POST, &url);
-        req = self.attach_oauth2(req).await;
-        req = req.json(payload);
+        let max_retries = 3;
+        for attempt in 1..=max_retries {
+            if self.is_oauth2_expired().await {
+                self.refresh_oauth2().await?;
+            }
+            let url = format!("https://connectapi.garmin.com{}", endpoint);
+            let mut req = self.client.request(Method::POST, &url);
+            req = self.attach_oauth2(req).await;
+            req = req.json(payload);
 
-        let res = req.send().await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = res.text().await.unwrap_or_default();
-            return Err(anyhow!("Garmin API POST returned {}: {}", status, text));
+            match req.send().await {
+                Ok(res) if res.status().is_success() => {
+                    if res.status() == 204 || res.content_length() == Some(0) {
+                        return Ok(serde_json::json!({}));
+                    }
+                    let body_text = res.text().await?;
+                    if body_text.trim().is_empty() {
+                        return Ok(serde_json::json!({}));
+                    }
+                    let json: serde_json::Value = serde_json::from_str(&body_text)?;
+                    return Ok(json);
+                }
+                Ok(res) => {
+                    let status = res.status();
+                    let text = res.text().await.unwrap_or_default();
+                    if attempt == max_retries {
+                        return Err(anyhow!("Garmin API POST returned {}: {}", status, text));
+                    }
+                    tracing::warn!("Garmin API POST {} failed with {}: {}. Retrying {}/{}", endpoint, status, text, attempt, max_retries);
+                }
+                Err(e) => {
+                    if attempt == max_retries {
+                        return Err(anyhow::anyhow!("Garmin API POST request failed: {}", e));
+                    }
+                    tracing::warn!("Garmin API POST {} request failed: {}. Retrying {}/{}", endpoint, e, attempt, max_retries);
+                }
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(2 * attempt)).await;
         }
-
-        if res.status() == 204 || res.content_length() == Some(0) {
-            return Ok(serde_json::json!({}));
-        }
-
-        let body_text = res.text().await?;
-        if body_text.trim().is_empty() {
-            return Ok(serde_json::json!({}));
-        }
-
-        let json: serde_json::Value = serde_json::from_str(&body_text)?;
-        Ok(json)
+        unreachable!()
     }
 
     /// Generic connectapi DELETE request
     pub async fn connectapi_delete(&self, endpoint: &str) -> Result<()> {
-        if self.is_oauth2_expired().await {
-            self.refresh_oauth2().await?;
-        }
-        let url = format!("https://connectapi.garmin.com{}", endpoint);
-        let mut req = self.client.request(Method::DELETE, &url);
-        req = self.attach_oauth2(req).await;
+        let max_retries = 3;
+        for attempt in 1..=max_retries {
+            if self.is_oauth2_expired().await {
+                self.refresh_oauth2().await?;
+            }
+            let url = format!("https://connectapi.garmin.com{}", endpoint);
+            let mut req = self.client.request(Method::DELETE, &url);
+            req = self.attach_oauth2(req).await;
 
-        let res = req.send().await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = res.text().await.unwrap_or_default();
-            return Err(anyhow!("Garmin API DELETE returned {}: {}", status, text));
+            match req.send().await {
+                Ok(res) if res.status().is_success() => {
+                    return Ok(());
+                }
+                Ok(res) => {
+                    let status = res.status();
+                    let text = res.text().await.unwrap_or_default();
+                    if attempt == max_retries {
+                        return Err(anyhow!("Garmin API DELETE returned {}: {}", status, text));
+                    }
+                    tracing::warn!("Garmin API DELETE {} failed with {}: {}. Retrying {}/{}", endpoint, status, text, attempt, max_retries);
+                }
+                Err(e) => {
+                    if attempt == max_retries {
+                        return Err(anyhow::anyhow!("Garmin API DELETE request failed: {}", e));
+                    }
+                    tracing::warn!("Garmin API DELETE {} request failed: {}. Retrying {}/{}", endpoint, e, attempt, max_retries);
+                }
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(2 * attempt)).await;
         }
-
-        Ok(())
+        unreachable!()
     }
 
     pub async fn get_activities(&self, start: u32, limit: u32) -> Result<Vec<GarminActivity>> {
@@ -276,7 +322,7 @@ impl GarminApi {
             }
             Err(e) => {
                 // For non-strength activities, this might 404
-                println!("Failed to get sets for activity {}: {}", activity_id, e);
+                info!("Failed to get sets for activity {}: {}", activity_id, e);
                 Ok(None)
             }
         }

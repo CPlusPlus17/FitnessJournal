@@ -1,3 +1,4 @@
+use tracing::{info, error};
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
@@ -314,7 +315,7 @@ fn write_file_atomically(path: &Path, content: &str) -> std::io::Result<()> {
         // In that case we fall back to direct write to preserve functionality.
         let needs_fallback = matches!(err.raw_os_error(), Some(16 | 18));
         if needs_fallback {
-            eprintln!(
+            error!(
                 "Atomic replace failed for {} ({}). Falling back to direct write.",
                 path.display(),
                 err
@@ -414,7 +415,7 @@ pub async fn run_server(
         )
     })?;
 
-    println!("API Server running at http://{}", addr);
+    info!("API Server running at http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -675,7 +676,7 @@ async fn get_upcoming_workouts(
 
 async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde_json::Value>)> {
     let data = std::fs::read_to_string(PROFILES_PATH).map_err(|err| {
-        eprintln!("Failed to read {}: {}", PROFILES_PATH, err);
+        error!("Failed to read {}: {}", PROFILES_PATH, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Profiles configuration is unavailable.",
@@ -683,7 +684,7 @@ async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde
     })?;
 
     let parsed = serde_json::from_str::<ProfilesPayload>(&data).map_err(|err| {
-        eprintln!("Failed to parse {}: {}", PROFILES_PATH, err);
+        error!("Failed to parse {}: {}", PROFILES_PATH, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Profiles configuration is invalid.",
@@ -691,7 +692,7 @@ async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde
     })?;
 
     let validated = validate_profiles_payload(parsed).map_err(|err| {
-        eprintln!("Validation failed for {}: {}", PROFILES_PATH, err);
+        error!("Validation failed for {}: {}", PROFILES_PATH, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Profiles configuration is invalid.",
@@ -705,7 +706,7 @@ async fn update_profiles(
     payload: Result<Json<ProfilesPayload>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let Json(payload) = payload.map_err(|err| {
-        eprintln!("Rejected invalid profiles payload: {}", err);
+        error!("Rejected invalid profiles payload: {}", err);
         error_response(StatusCode::BAD_REQUEST, "Invalid profiles payload.")
     })?;
 
@@ -713,7 +714,7 @@ async fn update_profiles(
         .map_err(|err| error_response(StatusCode::BAD_REQUEST, &err))?;
 
     let mut json_str = serde_json::to_string_pretty(&validated).map_err(|err| {
-        eprintln!("Failed to serialize {} payload: {}", PROFILES_PATH, err);
+        error!("Failed to serialize {} payload: {}", PROFILES_PATH, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to persist profiles configuration.",
@@ -722,7 +723,7 @@ async fn update_profiles(
     json_str.push('\n');
 
     write_file_atomically(Path::new(PROFILES_PATH), &json_str).map_err(|err| {
-        eprintln!("Failed to atomically write {}: {}", PROFILES_PATH, err);
+        error!("Failed to atomically write {}: {}", PROFILES_PATH, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to persist profiles configuration.",

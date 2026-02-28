@@ -15,6 +15,7 @@ use crate::garmin_client::GarminClient;
 use clap::Parser;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
 
 #[derive(Parser, Debug)]
 #[command(name = "fitness_journal", about = "Fitness Coach AI")]
@@ -44,24 +45,25 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
     dotenvy::dotenv().ok();
-    println!("Starting Fitness Coach...");
+    info!("Starting Fitness Coach...");
 
     let database = match Database::new() {
         Ok(db) => Arc::new(Mutex::new(db)),
         Err(e) => {
-            eprintln!("\n{}", "=".repeat(60));
-            eprintln!("🛑 DATABASE INITIALIZATION ERROR 🛑");
-            eprintln!("Failed to open or create the SQLite database.");
-            eprintln!("Error details: {}", e);
-            eprintln!("\n📝 Troubleshooting (Docker Users):");
-            eprintln!("If you are using docker-compose, 'fitness_journal.db' might have been automatically created as a DIRECTORY instead of a file.");
-            eprintln!("Please run these commands to fix this issue:");
-            eprintln!("  1. docker-compose down");
-            eprintln!("  2. rm -rf fitness_journal.db");
-            eprintln!("  3. touch fitness_journal.db");
-            eprintln!("  4. docker-compose up -d");
-            eprintln!("{}\n", "=".repeat(60));
+            error!("\n{}", "=".repeat(60));
+            error!("🛑 DATABASE INITIALIZATION ERROR 🛑");
+            error!("Failed to open or create the SQLite database.");
+            error!("Error details: {}", e);
+            error!("\n📝 Troubleshooting (Docker Users):");
+            error!("If you are using docker-compose, 'fitness_journal.db' might have been automatically created as a DIRECTORY instead of a file.");
+            error!("Please run these commands to fix this issue:");
+            error!("  1. docker-compose down");
+            error!("  2. rm -rf fitness_journal.db");
+            error!("  3. touch fitness_journal.db");
+            error!("  4. docker-compose up -d");
+            error!("{}\n", "=".repeat(60));
             std::process::exit(1);
         }
     };
@@ -84,13 +86,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let password = rpassword::prompt_password("Garmin Password: ")?;
 
-        println!("Logging into Garmin Connect...");
+        info!("Logging into Garmin Connect...");
         match crate::garmin_login::login_step_1(email, &password).await {
             Ok(crate::garmin_login::LoginResult::Success(o1, o2)) => {
-                println!("Login successful!");
+                info!("Login successful!");
                 write_secret_json_file("secrets/oauth1_token.json", &o1)?;
                 write_secret_json_file("secrets/oauth2_token.json", &o2)?;
-                println!(
+                info!(
                     "Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json"
                 );
             }
@@ -101,18 +103,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 io::stdin().read_line(&mut mfa_code)?;
                 let mfa_code = mfa_code.trim();
 
-                println!("Submitting MFA code...");
+                info!("Submitting MFA code...");
                 match crate::garmin_login::login_step_2_mfa(session, mfa_code).await {
                     Ok((o1, o2)) => {
-                        println!("MFA successful!");
+                        info!("MFA successful!");
                         write_secret_json_file("secrets/oauth1_token.json", &o1)?;
                         write_secret_json_file("secrets/oauth2_token.json", &o2)?;
-                        println!("Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json");
+                        info!("Saved credentials to secrets/oauth1_token.json and secrets/oauth2_token.json");
                     }
-                    Err(e) => println!("MFA login failed: {}", e),
+                    Err(e) => info!("MFA login failed: {}", e),
                 }
             }
-            Err(e) => println!("Login failed: {}", e),
+            Err(e) => info!("Login failed: {}", e),
         }
         return Ok(());
     }
@@ -120,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let garmin_client = Arc::new(GarminClient::new(database.clone()));
 
     if let Some(file) = args.test_upload {
-        println!("Testing workout upload with file: {}", file);
+        info!("Testing workout upload with file: {}", file);
         let json_str = std::fs::read_to_string(&file)?;
         let builder = crate::workout_builder::WorkoutBuilder::new();
         let parsed: serde_json::Value = serde_json::from_str(&json_str)?;
@@ -130,32 +132,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .connectapi_post("/workout-service/workout", &payload)
             .await
         {
-            Ok(res) => println!("Success! Workout ID: {:?}", res.get("workoutId")),
-            Err(e) => println!("Failed to create workout: {}", e),
+            Ok(res) => info!("Success! Workout ID: {:?}", res.get("workoutId")),
+            Err(e) => info!("Failed to create workout: {}", e),
         }
     }
 
     if let Some(workout_id) = args.test_fetch {
-        println!("Fetching workout ID '{}' from Garmin...", workout_id);
+        info!("Fetching workout ID '{}' from Garmin...", workout_id);
         let endpoint = format!("/workout-service/workout/{}", workout_id);
         match garmin_client.api.connectapi_get(&endpoint).await {
-            Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
-            Err(e) => println!("Failed: {}", e),
+            Ok(res) => info!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
+            Err(e) => info!("Failed: {}", e),
         }
         return Ok(());
     }
 
     if let Some(url) = args.test_fetch_url {
-        println!("Fetching URL '{}' from Garmin...", url);
+        info!("Fetching URL '{}' from Garmin...", url);
         match garmin_client.api.connectapi_get(&url).await {
-            Ok(res) => println!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
-            Err(e) => println!("Failed: {}", e),
+            Ok(res) => info!("Response Payload:\n{}", serde_json::to_string_pretty(&res)?),
+            Err(e) => info!("Failed: {}", e),
         }
         return Ok(());
     }
 
     if args.delete_workouts {
-        println!("Fetching workouts to delete...");
+        info!("Fetching workouts to delete...");
         match garmin_client.api.get_workouts().await {
             Ok(workouts) => {
                 if let Some(arr) = workouts.as_array() {
@@ -170,40 +172,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    println!("Found {} workouts to delete.", to_delete.len());
+                    info!("Found {} workouts to delete.", to_delete.len());
                     for (wid, name) in to_delete {
                         let endpoint = format!("/workout-service/workout/{}", wid);
                         match garmin_client.api.connectapi_delete(&endpoint).await {
-                            Ok(_) => println!("Deleted {} ({})", wid, name),
-                            Err(e) => println!("Failed to delete {}: {}", wid, e),
+                            Ok(_) => info!("Deleted {} ({})", wid, name),
+                            Err(e) => info!("Failed to delete {}: {}", wid, e),
                         }
                     }
                 }
             }
-            Err(e) => println!("Failed to fetch workouts: {}", e),
+            Err(e) => info!("Failed to fetch workouts: {}", e),
         }
         return Ok(());
     }
 
     if args.test_refresh {
-        println!("Testing OAuth2 Token Refresh...");
+        info!("Testing OAuth2 Token Refresh...");
         let temp_db = Arc::new(Mutex::new(
             Database::new().expect("Failed to initialize SQLite database"),
         ));
         let garmin_client_refresh = crate::garmin_client::GarminClient::new(temp_db);
         match garmin_client_refresh.api.refresh_oauth2().await {
-            Ok(_) => println!("Successfully refreshed token!"),
-            Err(e) => println!("Failed to refresh: {}", e),
+            Ok(_) => info!("Successfully refreshed token!"),
+            Err(e) => info!("Failed to refresh: {}", e),
         }
         return Ok(());
     }
 
     if is_api {
-        println!("Starting Fitness Coach in API mode.");
+        info!("Starting Fitness Coach in API mode.");
         if let Err(e) =
             api::run_server(database.clone(), garmin_client.clone(), coach.clone()).await
         {
-            eprintln!("API Server crashed: {}", e);
+            error!("API Server crashed: {}", e);
         }
         return Ok(());
     }
@@ -221,14 +223,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if is_daemon {
-        println!("Starting Fitness Coach in DAEMON mode. Will run every 24 hours.");
+        info!("Starting Fitness Coach in DAEMON mode. Will run every 24 hours.");
         crate::bot::start_morning_notifier(garmin_client.clone());
         if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
             crate::bot::start_weekly_review_notifier(garmin_client.clone(), gemini_key);
         }
         loop {
             run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
-            println!("Sleeping for 24 hours... zzz");
+            info!("Sleeping for 24 hours... zzz");
             tokio::time::sleep(tokio::time::Duration::from_secs(86400)).await;
         }
     } else {
@@ -244,7 +246,7 @@ pub async fn run_coach_pipeline(
     database: Arc<Mutex<Database>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Fetch Detailed Data from Garmin Connect (Native Rust)
-    println!("\nFetching detailed stats from Garmin Connect...");
+    info!("\nFetching detailed stats from Garmin Connect...");
     let (
         detailed_activities,
         active_plans,
@@ -254,7 +256,7 @@ pub async fn run_coach_pipeline(
         recovery,
     ) = match garmin_client.fetch_data().await {
         Ok(response) => {
-            println!(
+            info!(
                 "Found {} detailed activities, {} active plans, and {} scheduled workouts.",
                 response.activities.len(),
                 response.plans.len(),
@@ -270,7 +272,7 @@ pub async fn run_coach_pipeline(
             )
         }
         Err(e) => {
-            eprintln!("Failed to fetch detailed Garmin data: {}", e);
+            error!("Failed to fetch detailed Garmin data: {}", e);
             (Vec::new(), Vec::new(), None, None, Vec::new(), None)
         }
     };
@@ -294,7 +296,7 @@ pub async fn run_coach_pipeline(
     }
 
     // 5. Generate Brief
-    println!("\nGenerating Coach Brief...");
+    info!("\nGenerating Coach Brief...");
     let brief = coach.generate_brief(crate::coaching::BriefInput {
         detailed_activities: &detailed_activities,
         plans: &active_plans,
@@ -306,11 +308,11 @@ pub async fn run_coach_pipeline(
         progression_history: &progression_history,
     });
 
-    println!("Coach brief generated ({} characters).", brief.len());
+    info!("Coach brief generated ({} characters).", brief.len());
     if std::env::var("FITNESS_DEBUG_PROMPT").is_ok() {
-        println!("===================================================");
-        println!("{}", brief);
-        println!("===================================================");
+        info!("===================================================");
+        info!("{}", brief);
+        info!("===================================================");
     }
 
     // 6. Generate and Publish Plan
@@ -322,7 +324,7 @@ pub async fn run_coach_pipeline(
             &gemini_key,
         ).await;
     } else {
-        println!("\nNo GEMINI_API_KEY set. Skipping automatic workout generation.");
+        info!("\nNo GEMINI_API_KEY set. Skipping automatic workout generation.");
     }
 
     Ok(())
@@ -334,7 +336,7 @@ async fn sync_workouts_to_db(
 ) -> Vec<String> {
     for act in detailed_activities {
         if let Err(e) = database.lock().await.insert_activity(act) {
-            eprintln!(
+            error!(
                 "Failed to insert activity {} into DB: {}",
                 act.id.unwrap_or(0),
                 e
@@ -347,7 +349,7 @@ async fn sync_workouts_to_db(
         .await
         .get_progression_history()
         .unwrap_or_default();
-    println!(
+    info!(
         "Loaded progression history for {} exercises.",
         progression_history.len()
     );
@@ -370,7 +372,7 @@ fn load_profile_context() -> (crate::coaching::CoachContext, Vec<String>) {
     if let Ok(profile_data) = std::fs::read_to_string("profiles.json") {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&profile_data) {
             if let Some(active_name) = json.get("active_profile").and_then(|v| v.as_str()) {
-                println!("Loaded active equipment profile: {}", active_name);
+                info!("Loaded active equipment profile: {}", active_name);
                 if let Some(profile) = json.get("profiles").and_then(|p| p.get(active_name)) {
                     if let Some(goals) = profile.get("goals").and_then(|g| g.as_array()) {
                         let parsed_goals: Vec<String> = goals
@@ -380,7 +382,7 @@ fn load_profile_context() -> (crate::coaching::CoachContext, Vec<String>) {
                         if !parsed_goals.is_empty() {
                             context.goals = parsed_goals;
                         } else {
-                            println!(
+                            info!(
                                 "Warning: profile '{}' has no valid goals. Falling back to default goals.",
                                 active_name
                             );
@@ -445,7 +447,7 @@ async fn auto_analyze_recent_activities(
             if auto_analyze_sports.contains(&act_type.to_string()) {
                 let is_analyzed = db.is_activity_analyzed(id).unwrap_or(false);
                 if !is_analyzed {
-                    println!("Activity {} ({}) matches auto_analyze_sports. Requesting analysis...", id, act_type);
+                    info!("Activity {} ({}) matches auto_analyze_sports. Requesting analysis...", id, act_type);
 
                     let prompt = format!(
                         "Please provide an in-depth analysis of this completed fitness activity. Be encouraging but highly analytical.\n\nYou have been provided with the complete, raw JSON payload direct from Garmin. It contains many undocumented fields, extra metrics, recovery data, elevation, stress, cadence, temperatures, or detailed exercise sets.\n\nPlease actively hunt through this raw JSON and surface interesting insights, anomalies, or performance correlations that wouldn't be obvious from just the basic time/distance metrics. Explain what these deeper metrics mean for the athlete's progress.\n\nKeep the response concise enough for a messaging app (max 2-3 short paragraphs) and format it directly as text without any markdown wrappers.\n\nHere is the raw activity data:\n\n{}",
@@ -454,7 +456,7 @@ async fn auto_analyze_recent_activities(
 
                     match ai_client.generate_workout(&prompt).await {
                         Ok(analysis) => {
-                            println!("Analysis generated! Broadcasting via Signal...");
+                            info!("Analysis generated! Broadcasting via Signal...");
                             let msg = format!(
                                 "📊 **Activity Analysis: {}**\n\n{}",
                                 act.name.as_deref().unwrap_or("Untitled Workout"),
@@ -465,11 +467,11 @@ async fn auto_analyze_recent_activities(
                             if let Err(e) =
                                 db.save_activity_analysis(id, &act.start_time, &analysis)
                             {
-                                eprintln!("Failed to save activity analysis to DB: {}", e);
+                                error!("Failed to save activity analysis to DB: {}", e);
                             }
                         }
                         Err(e) => {
-                            eprintln!("Failed to generate analysis for {}: {}", id, e)
+                            error!("Failed to generate analysis for {}: {}", id, e)
                         }
                     }
                 }
@@ -484,53 +486,53 @@ async fn generate_and_publish_plan(
     database: &Arc<Mutex<Database>>,
     gemini_key: &str,
 ) {
-    println!("\nGEMINI_API_KEY found! Generating workout via Gemini 3.1 Pro Preview...");
+    info!("\nGEMINI_API_KEY found! Generating workout via Gemini 3.1 Pro Preview...");
 
     // Initialize AI Client
     let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
 
-    println!("Cleaning up previously generated workouts before generating a new plan...");
+    info!("Cleaning up previously generated workouts before generating a new plan...");
     if let Err(e) = garmin_client.cleanup_ai_workouts().await {
-        println!("Warning: failed to cleanup old AI workouts: {}", e);
+        info!("Warning: failed to cleanup old AI workouts: {}", e);
     }
 
-    println!("Wiping previous chat context...");
+    info!("Wiping previous chat context...");
     if let Err(e) = database.lock().await.clear_ai_chat() {
-        println!("Warning: failed to clear AI chat log: {}", e);
+        info!("Warning: failed to clear AI chat log: {}", e);
     }
 
-    println!("Wiping previous coach briefs...");
+    info!("Wiping previous coach briefs...");
     if let Err(e) = database.lock().await.clear_coach_briefs() {
-        println!("Warning: failed to clear coach briefs: {}", e);
+        info!("Warning: failed to clear coach briefs: {}", e);
     }
 
     match ai_client.generate_workout(brief).await {
         Ok(markdown_response) => {
-            println!("Received response from AI!");
+            info!("Received response from AI!");
 
             if let Err(e) = database
                 .lock()
                 .await
                 .add_coach_brief(brief, &markdown_response)
             {
-                println!("Warning: failed to save coach brief to db: {}", e);
+                info!("Warning: failed to save coach brief to db: {}", e);
             }
 
             match crate::ai_client::AiClient::extract_json_block(&markdown_response) {
                 Ok(json_str) => {
                     let out_file = "generated_workouts.json";
                     if let Err(e) = std::fs::write(out_file, &json_str) {
-                        eprintln!("Failed to write to {}: {}", out_file, e);
+                        error!("Failed to write to {}: {}", out_file, e);
                     } else {
-                        println!("Saved structured workout to {}", out_file);
+                        info!("Saved structured workout to {}", out_file);
                     }
 
                     // Upload to Garmin
-                    println!("Uploading to Garmin Connect...");
+                    info!("Uploading to Garmin Connect...");
                     let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
                         Ok(v) => v,
                         Err(e) => {
-                            eprintln!("Failed to parse generated JSON: {}", e);
+                            error!("Failed to parse generated JSON: {}", e);
                             return;
                         }
                     };
@@ -563,7 +565,7 @@ async fn generate_and_publish_plan(
                             .await
                         {
                             Ok(msg) => {
-                                println!("{}", msg);
+                                info!("{}", msg);
                                 let sch_date = workout_spec
                                     .get("scheduledDate")
                                     .and_then(|d| d.as_str())
@@ -576,7 +578,7 @@ async fn generate_and_publish_plan(
                                     sch_date, detailed_str
                                 ));
                             }
-                            Err(e) => println!("{}", e),
+                            Err(e) => info!("{}", e),
                         }
                     }
 
@@ -592,14 +594,14 @@ async fn generate_and_publish_plan(
                     let _ = database.lock().await.clear_garmin_cache();
                 }
                 Err(e) => {
-                    eprintln!("Could not extract JSON from AI response: {}", e);
+                    error!("Could not extract JSON from AI response: {}", e);
                     if std::env::var("FITNESS_DEBUG_PROMPT").is_ok() {
-                        println!("Raw Response:\n{}", markdown_response);
+                        info!("Raw Response:\n{}", markdown_response);
                     }
                 }
             }
         }
-        Err(e) => eprintln!("Failed to call Gemini: {}", e),
+        Err(e) => error!("Failed to call Gemini: {}", e),
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::garmin_api::GarminApi;
+use tracing::{info, error};
 use crate::models::GarminResponse;
 use anyhow::{Context, Result};
 
@@ -46,7 +47,7 @@ impl GarminClient {
 
                 if elapsed < 3600 {
                     // 1 Hour
-                    println!("Using cached Garmin data ({} mins old)...", elapsed / 60);
+                    info!("Using cached Garmin data ({} mins old)...", elapsed / 60);
                     let response: GarminResponse = serde_json::from_str(&cached_data)
                         .context("Failed to parse cached Garmin JSON output")?;
                     return Ok(response);
@@ -58,7 +59,7 @@ impl GarminClient {
         let activities = match self.api.get_activities(0, 50).await {
             Ok(acts) => acts,
             Err(e) => {
-                eprintln!("Failed to fetch activities from Garmin: {}", e);
+                error!("Failed to fetch activities from Garmin: {}", e);
                 Vec::new()
             }
         };
@@ -85,7 +86,7 @@ impl GarminClient {
                     serde_json::from_value(v).unwrap_or(None)
                 }
                 Err(e) => {
-                    println!("Error fetching user profile: {}", e);
+                    info!("Error fetching user profile: {}", e);
                     None
                 }
             };
@@ -137,7 +138,7 @@ impl GarminClient {
                                     }
                                 }
                             }
-                            Err(e) => println!(
+                            Err(e) => info!(
                                 "Failed to parse calendar item (type: {:?}): {}. Raw: {:?}",
                                 item.get("itemType"),
                                 e,
@@ -186,7 +187,7 @@ impl GarminClient {
                     }
                 }
             }
-            Err(e) => println!("Error fetching Body Battery: {}", e),
+            Err(e) => info!("Error fetching Body Battery: {}", e),
         }
 
         match self.api.get_sleep_data(&display_name, &today_str).await {
@@ -199,7 +200,7 @@ impl GarminClient {
                     .and_then(|v| v.as_i64())
                     .map(|v| v as i32);
             }
-            Err(e) => println!("Error fetching Sleep Data: {}", e),
+            Err(e) => info!("Error fetching Sleep Data: {}", e),
         }
 
         match self.api.get_training_readiness(&today_str).await {
@@ -213,7 +214,7 @@ impl GarminClient {
                     }
                 }
             }
-            Err(e) => println!("Error fetching Training Readiness: {}", e),
+            Err(e) => info!("Error fetching Training Readiness: {}", e),
         }
 
         match self.api.get_hrv_status(&today_str).await {
@@ -233,7 +234,7 @@ impl GarminClient {
                         .map(|v| v as i32);
                 }
             }
-            Err(e) => println!("Error fetching HRV JSON: {}", e),
+            Err(e) => info!("Error fetching HRV JSON: {}", e),
         }
 
         let seven_days_ago_str = (today - chrono::Duration::days(7))
@@ -279,7 +280,7 @@ impl GarminClient {
                     recovery_metrics.rhr_trend = trend;
                 }
             }
-            Err(e) => println!("Error fetching RHR TREND: {}", e),
+            Err(e) => info!("Error fetching RHR TREND: {}", e),
         }
 
         let mut final_activities = Vec::new();
@@ -309,14 +310,14 @@ impl GarminClient {
 
         // 3. Save to Cache
         if let Err(e) = self.db.lock().await.set_garmin_cache(&stdout) {
-            eprintln!("Warning: Failed to write to Garmin cache in DB: {}", e);
+            error!("Warning: Failed to write to Garmin cache in DB: {}", e);
         }
 
         Ok(response)
     }
 
     pub async fn cleanup_ai_workouts(&self) -> Result<()> {
-        println!("Fetching workouts to delete...");
+        info!("Fetching workouts to delete...");
         let workouts = self.api.get_workouts().await?;
         if let Some(arr) = workouts.as_array() {
             let mut to_delete = Vec::new();
@@ -330,12 +331,12 @@ impl GarminClient {
                 }
             }
 
-            println!("Found {} workouts to delete.", to_delete.len());
+            info!("Found {} workouts to delete.", to_delete.len());
             for (wid, name) in to_delete {
                 let endpoint = format!("/workout-service/workout/{}", wid);
                 match self.api.connectapi_delete(&endpoint).await {
-                    Ok(_) => println!("Deleted {} ({})", wid, name),
-                    Err(e) => println!("Failed to delete {}: {}", wid, e),
+                    Ok(_) => info!("Deleted {} ({})", wid, name),
+                    Err(e) => info!("Failed to delete {}: {}", wid, e),
                 }
             }
         }

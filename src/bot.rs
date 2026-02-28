@@ -1,4 +1,5 @@
 use futures_util::StreamExt;
+use tracing::{info, error};
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -37,12 +38,12 @@ impl BotController {
     }
 
     pub async fn run(&self) {
-        println!("Starting Signal Bot... connecting to signal-cli-rest-api WS...");
+        info!("Starting Signal Bot... connecting to signal-cli-rest-api WS...");
 
         let signal_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
             Ok(n) if !n.trim().is_empty() => n,
             _ => {
-                eprintln!("CRITICAL: SIGNAL_PHONE_NUMBER environment variable is missing but bot was started. Exiting bot loop.");
+                error!("CRITICAL: SIGNAL_PHONE_NUMBER environment variable is missing but bot was started. Exiting bot loop.");
                 return;
             }
         };
@@ -55,7 +56,7 @@ impl BotController {
         let (ws_stream, _) = match connect_async(&ws_url).await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!(
+                error!(
                     "Failed to connect to Signal WebSocket. Is the docker container running? {}",
                     e
                 );
@@ -63,7 +64,7 @@ impl BotController {
             }
         };
 
-        println!("Signal Bot Connected!");
+        info!("Signal Bot Connected!");
         let (mut _write, mut read) = ws_stream.split();
         let mut processed_msgs = std::collections::VecDeque::new();
 
@@ -135,7 +136,7 @@ impl BotController {
                                             sender = Some(acc.to_string());
                                         }
                                     } else {
-                                        println!(
+                                        info!(
                                             "Ignoring sent message to foreign destination: {:?}",
                                             destination
                                         );
@@ -157,7 +158,7 @@ impl BotController {
                             processed_msgs.pop_front();
                         }
 
-                        println!("Received Signal message from {}", msg_sender);
+                        info!("Received Signal message from {}", msg_sender);
 
                         if text_trim.starts_with('/') {
                             let mut parts = text_trim.splitn(2, ' ');
@@ -263,10 +264,10 @@ impl BotController {
                                 .await
                             {
                                 Ok(msg) => {
-                                    println!("Conversational Coach Scheduled Workout: {}", msg)
+                                    info!("Conversational Coach Scheduled Workout: {}", msg)
                                 }
                                 Err(e) => {
-                                    eprintln!("Conversational Coach failed to schedule: {}", e)
+                                    error!("Conversational Coach failed to schedule: {}", e)
                                 }
                             }
                         }
@@ -394,7 +395,7 @@ impl BotController {
         let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
             Ok(n) if !n.trim().is_empty() => n,
             _ => {
-                eprintln!("Warning: SIGNAL_PHONE_NUMBER not set. Cannot send reply.");
+                error!("Warning: SIGNAL_PHONE_NUMBER not set. Cannot send reply.");
                 return;
             }
         };
@@ -419,14 +420,14 @@ impl BotController {
                 if !r.status().is_success() {
                     let status = r.status();
                     if let Ok(body) = r.text().await {
-                        eprintln!("Signal reply failed with status {}: {}", status, body);
+                        error!("Signal reply failed with status {}: {}", status, body);
                     } else {
-                        eprintln!("Signal reply failed with status {}", status);
+                        error!("Signal reply failed with status {}", status);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Failed to send Signal reply network error: {}", e);
+                error!("Failed to send Signal reply network error: {}", e);
             }
         }
     }
@@ -451,7 +452,7 @@ pub async fn broadcast_message(text: &str) {
     let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
         Ok(n) if !n.trim().is_empty() => n,
         _ => {
-            eprintln!("Warning: SIGNAL_PHONE_NUMBER not set. Skipping broadcast.");
+            error!("Warning: SIGNAL_PHONE_NUMBER not set. Skipping broadcast.");
             return;
         }
     };
@@ -476,16 +477,16 @@ pub async fn broadcast_message(text: &str) {
             if !r.status().is_success() {
                 let status = r.status();
                 if let Ok(body) = r.text().await {
-                    eprintln!("Signal broadcast failed with status {}: {}", status, body);
+                    error!("Signal broadcast failed with status {}: {}", status, body);
                 } else {
-                    eprintln!("Signal broadcast failed with status {}", status);
+                    error!("Signal broadcast failed with status {}", status);
                 }
             } else {
-                println!("Signal broadcast succeeded!");
+                info!("Signal broadcast succeeded!");
             }
         }
         Err(e) => {
-            eprintln!("Failed to broadcast Signal message network error: {}", e);
+            error!("Failed to broadcast Signal message network error: {}", e);
         }
     }
 }
@@ -596,7 +597,7 @@ pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
                         last_sent_date = today;
                     }
                     Err(e) => {
-                        eprintln!("Morning notifier failed to fetch garmin data: {}", e);
+                        error!("Morning notifier failed to fetch garmin data: {}", e);
                     }
                 }
             }
@@ -706,11 +707,11 @@ pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, gemini_key
                                 broadcast_message(&msg).await;
                                 last_sent_week = current_week;
                             }
-                            Err(e) => eprintln!("Failed to generate weekly review from AI: {}", e),
+                            Err(e) => error!("Failed to generate weekly review from AI: {}", e),
                         }
                     }
                     Err(e) => {
-                        eprintln!("Weekly review notifier failed to fetch garmin data: {}", e);
+                        error!("Weekly review notifier failed to fetch garmin data: {}", e);
                     }
                 }
             }

@@ -1,4 +1,5 @@
 use crate::models::{TrainingPlan, TrainingTarget, WorkoutType};
+use tracing::{info, error};
 use chrono::{Duration, Utc};
 
 pub struct CoachContext {
@@ -86,7 +87,7 @@ impl Coach {
             }
         }
 
-        println!(
+        info!(
             "Recent Activity (Last 7d): Bike: {}, Run: {}, Strength: {} (Vol: {:.0}kg)",
             bike_count, run_count, strength_count, strength_volume_kg
         );
