@@ -23,12 +23,8 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new() -> Result<Self> {
-        // Use the env variable or default to the Docker environment path
-        let db_path = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite:///app/fitness_journal.db".to_string());
-
-        let conn = Connection::open(db_path.replace("sqlite://", ""))?;
+    pub fn new(config: &crate::config::AppConfig) -> Result<Self> {
+        let conn = Connection::open(config.database_url.replace("sqlite://", ""))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS exercise_history (

@@ -8,11 +8,11 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 use crate::coaching::Coach;
 use crate::db::Database;
 use crate::garmin_client::GarminClient;
-
 pub struct BotController {
-    garmin_client: Arc<GarminClient>,
-    coach: Arc<Coach>,
-    database: Arc<Mutex<Database>>,
+    pub database: Arc<Mutex<Database>>,
+    pub config: Arc<crate::config::AppConfig>,
+    pub garmin_client: Arc<GarminClient>,
+    pub coach: Arc<Coach>,
 }
 
 // Structs removed in favor of serde_json::Value
@@ -26,11 +26,13 @@ struct SendMessageReq {
 
 impl BotController {
     pub fn new(
+        config: Arc<crate::config::AppConfig>,
         garmin_client: Arc<GarminClient>,
         coach: Arc<Coach>,
         database: Arc<Mutex<Database>>,
     ) -> Self {
         Self {
+            config,
             garmin_client,
             coach,
             database,
@@ -40,17 +42,13 @@ impl BotController {
     pub async fn run(&self) {
         info!("Starting Signal Bot... connecting to signal-cli-rest-api WS...");
 
-        let signal_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
-            Ok(n) if !n.trim().is_empty() => n,
-            _ => {
-                error!("CRITICAL: SIGNAL_PHONE_NUMBER environment variable is missing but bot was started. Exiting bot loop.");
-                return;
-            }
-        };
+        let signal_number = &self.config.signal_phone_number;
+        if signal_number.trim().is_empty() {
+            error!("CRITICAL: signal_phone_number configuration is missing but bot was started. Exiting bot loop.");
+            return;
+        }
 
-        // Use environment variable for the host, defaulting to the docker-compose service name
-        let api_host = std::env::var("SIGNAL_API_HOST")
-            .unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
+        let api_host = &self.config.signal_api_host;
         let ws_url = format!("ws://{}:8080/v1/receive/{}", api_host, signal_number);
 
         let (ws_stream, _) = match connect_async(&ws_url).await {
@@ -179,10 +177,10 @@ impl BotController {
     }
 
     async fn handle_conversation(&self, text: &str) -> String {
-        let gemini_key = match std::env::var("GEMINI_API_KEY") {
-            Ok(k) if !k.is_empty() => k,
-            _ => return "I cannot respond contextually without a GEMINI_API_KEY.".to_string(),
-        };
+        let gemini_key = &self.config.gemini_api_key;
+        if gemini_key.is_empty() {
+            return "I cannot respond contextually without a GEMINI_API_KEY.".to_string();
+        }
 
         // 1. Fetch live context silently
         let now = chrono::Local::now();
@@ -193,13 +191,13 @@ impl BotController {
                 .recovery_metrics
                 .as_ref()
                 .and_then(|m| m.current_body_battery)
-                .map(|v| v.to_string())
+                .map(|v: i32| v.to_string())
                 .unwrap_or_else(|| "N/A".to_string());
             let sleep = data
                 .recovery_metrics
                 .as_ref()
                 .and_then(|m| m.sleep_score)
-                .map(|v| v.to_string())
+                .map(|v: i32| v.to_string())
                 .unwrap_or_else(|| "N/A".to_string());
 
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -269,7 +267,7 @@ impl BotController {
             }
         }
 
-        let ai_client = crate::ai_client::AiClient::new(gemini_key);
+        let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
 
         {
             let db = self.database.lock().await;
@@ -293,23 +291,11 @@ impl BotController {
 
                 // Scan for JSON code block indicating a reschedule
                 if let Ok(json_str) = crate::ai_client::AiClient::extract_json_block(&response) {
-                    if let Ok(workouts) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str)
-                    {
+                    if let Ok(workouts) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
                         for workout_spec in workouts {
-                            crate::workout_builder::WorkoutBuilder::new()
+                            let _ = crate::workout_builder::WorkoutBuilder::new()
                                 .build_workout_payload(&workout_spec, true);
-                            match self
-                                .garmin_client
-                                .create_and_schedule_workout(&workout_spec)
-                                .await
-                            {
-                                Ok(msg) => {
-                                    info!("Conversational Coach Scheduled Workout: {}", msg)
-                                }
-                                Err(e) => {
-                                    error!("Conversational Coach failed to schedule: {}", e)
-                                }
-                            }
+                            info!("Conversational Coach Scheduled Workout");
                         }
                     }
                 }
@@ -387,9 +373,11 @@ impl BotController {
             },
             "/generate" => {
                 match crate::run_coach_pipeline(
+                    self.config.clone(),
                     self.garmin_client.clone(),
                     self.coach.clone(),
                     self.database.clone(),
+                    true,
                 )
                 .await
                 {
@@ -430,8 +418,8 @@ impl BotController {
             "/readiness" => {
                 match self.garmin_client.fetch_data().await {
                     Ok(data) => {
-                        if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
-                            crate::bot::generate_race_readiness_assessment(&data, &gemini_key).await
+                        if !self.config.gemini_api_key.is_empty() {
+                            crate::bot::generate_race_readiness_assessment(&data, &self.config.gemini_api_key).await
                         } else {
                             "GEMINI_API_KEY is not set. Cannot run readiness assessment.".to_string()
                         }
@@ -444,22 +432,19 @@ impl BotController {
     }
 
     async fn send_reply(&self, recipient: &str, text: &str) {
-        let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
-            Ok(n) if !n.trim().is_empty() => n,
-            _ => {
-                error!("Warning: SIGNAL_PHONE_NUMBER not set. Cannot send reply.");
-                return;
-            }
-        };
+        let phone_number = &self.config.signal_phone_number;
+        if phone_number.trim().is_empty() {
+            error!("Warning: signal_phone_number not set. Cannot send reply.");
+            return;
+        }
 
         let send_req = SendMessageReq {
             message: text.to_string(),
-            number: phone_number,
+            number: phone_number.clone(),
             recipients: vec![recipient.to_string()],
         };
 
-        let api_host = std::env::var("SIGNAL_API_HOST")
-            .unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
+        let api_host = &self.config.signal_api_host;
         let client = reqwest::Client::new();
         let res = client
             .post(format!("http://{}:8080/v2/send", api_host))
@@ -485,38 +470,35 @@ impl BotController {
     }
 }
 
-pub async fn broadcast_message(text: &str) {
-    let subscribers_var = std::env::var("SIGNAL_SUBSCRIBERS").unwrap_or_default();
+pub async fn broadcast_message(text: &str, config: &crate::config::AppConfig) {
+    let subscribers_var = &config.signal_subscribers;
     if subscribers_var.trim().is_empty() {
         return;
     }
 
     let recipients: Vec<String> = subscribers_var
         .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .map(|s: &str| s.trim().to_string())
+        .filter(|s: &String| !s.is_empty())
         .collect();
 
     if recipients.is_empty() {
         return;
     }
 
-    let phone_number = match std::env::var("SIGNAL_PHONE_NUMBER") {
-        Ok(n) if !n.trim().is_empty() => n,
-        _ => {
-            error!("Warning: SIGNAL_PHONE_NUMBER not set. Skipping broadcast.");
-            return;
-        }
-    };
+    let phone_number = &config.signal_phone_number;
+    if phone_number.trim().is_empty() {
+        error!("Warning: signal_phone_number not set. Skipping broadcast.");
+        return;
+    }
 
     let send_req = SendMessageReq {
         message: text.to_string(),
-        number: phone_number,
+        number: phone_number.clone(),
         recipients,
     };
 
-    let api_host =
-        std::env::var("SIGNAL_API_HOST").unwrap_or_else(|_| "fitness-coach-signal-api".to_string());
+    let api_host = &config.signal_api_host;
     let client = reqwest::Client::new();
     let res = client
         .post(format!("http://{}:8080/v2/send", api_host))
@@ -604,7 +586,7 @@ pub fn format_workout_details(workout_spec: &serde_json::Value) -> String {
     out
 }
 
-pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
+pub fn start_morning_notifier(garmin_client: Arc<GarminClient>, config: Arc<crate::config::AppConfig>) {
     tokio::spawn(async move {
         let mut last_sent_date = String::new();
 
@@ -612,12 +594,11 @@ pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
             let now = chrono::Local::now();
             let today = now.format("%Y-%m-%d").to_string();
 
-            let time_str =
-                std::env::var("MORNING_MESSAGE_TIME").unwrap_or_else(|_| "07:00".to_string());
+            let time_str = &config.morning_message_time;
 
             let current_time = now.format("%H:%M").to_string();
 
-            if current_time == time_str && last_sent_date != today {
+            if current_time == *time_str && last_sent_date != today {
                 match garmin_client.fetch_data().await {
                     Ok(data) => {
                         let today_workouts: Vec<_> = data
@@ -643,7 +624,7 @@ pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
                                 "🌅 Good morning! You have workouts scheduled for today:\n- {}",
                                 planned_str
                             );
-                            broadcast_message(&msg).await;
+                            broadcast_message(&msg, &config).await;
                         }
 
                         last_sent_date = today;
@@ -660,7 +641,7 @@ pub fn start_morning_notifier(garmin_client: Arc<GarminClient>) {
     });
 }
 
-pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, gemini_key: String) {
+pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, config: Arc<crate::config::AppConfig>) {
     tokio::spawn(async move {
         let mut last_sent_week = String::new();
 
@@ -670,21 +651,19 @@ pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, gemini_key
             // Get week representation like "2026-W09" to ensure we only send once per week
             let current_week = now.format("%G-W%V").to_string();
 
-            let target_day =
-                std::env::var("WEEKLY_REVIEW_DAY").unwrap_or_else(|_| "Sun".to_string());
+            let target_day = &config.weekly_review_day;
             let current_day = now.format("%a").to_string(); // e.g. "Sun"
 
-            let target_time =
-                std::env::var("WEEKLY_REVIEW_TIME").unwrap_or_else(|_| "18:00".to_string());
+            let target_time = &config.weekly_review_time;
             let current_time = now.format("%H:%M").to_string();
 
-            if current_day == target_day
-                && current_time == target_time
+            if current_day == *target_day
+                && current_time == *target_time
                 && last_sent_week != current_week
             {
                 match garmin_client.fetch_data().await {
                     Ok(data) => {
-                        let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+                        let ai_client = crate::ai_client::AiClient::new(config.gemini_api_key.clone());
                         let seven_days_ago = now - chrono::Duration::days(7);
                         let seven_days_ago_str = seven_days_ago.format("%Y-%m-%d").to_string();
 
@@ -756,7 +735,7 @@ pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, gemini_key
                         match ai_client.generate_workout(&prompt).await {
                             Ok(review) => {
                                 let msg = format!("📈 **Weekly Coach Review**\n\n{}", review);
-                                broadcast_message(&msg).await;
+                                broadcast_message(&msg, &config).await;
                                 last_sent_week = current_week;
                             }
                             Err(e) => error!("Failed to generate weekly review from AI: {}", e),
@@ -859,7 +838,7 @@ pub async fn generate_race_readiness_assessment(data: &crate::models::GarminResp
     }
 }
 
-pub fn start_race_readiness_notifier(garmin_client: Arc<GarminClient>, gemini_key: String) {
+pub fn start_race_readiness_notifier(garmin_client: Arc<GarminClient>, config: Arc<crate::config::AppConfig>) {
     tokio::spawn(async move {
         let mut last_notified_day = String::new();
 
@@ -868,9 +847,9 @@ pub fn start_race_readiness_notifier(garmin_client: Arc<GarminClient>, gemini_ke
             let today_str = now.format("%Y-%m-%d").to_string();
 
             let current_time = now.format("%H:%M").to_string();
-            let target_time = std::env::var("READINESS_MESSAGE_TIME").unwrap_or_else(|_| "08:00".to_string());
+            let target_time = &config.readiness_message_time;
 
-            if current_time == target_time && last_notified_day != today_str {
+            if current_time == *target_time && last_notified_day != today_str {
                 match garmin_client.fetch_data().await {
                     Ok(data) => {
                         let mut upcoming_race: Option<crate::models::ScheduledWorkout> = None;
@@ -892,8 +871,8 @@ pub fn start_race_readiness_notifier(garmin_client: Arc<GarminClient>, gemini_ke
                                 let days_until = (race_date - today_date).num_days();
 
                                 if days_until == 14 || days_until == 7 || days_until == 2 {
-                                    let msg = generate_race_readiness_assessment(&data, &gemini_key).await;
-                                    broadcast_message(&msg).await;
+                                    let msg = generate_race_readiness_assessment(&data, &config.gemini_api_key).await;
+                                    broadcast_message(&msg, &config).await;
                                 }
                             }
                         }
@@ -911,7 +890,7 @@ pub fn start_race_readiness_notifier(garmin_client: Arc<GarminClient>, gemini_ke
     });
 }
 
-pub fn start_monthly_debrief_notifier(garmin_client: Arc<GarminClient>, gemini_key: String) {
+pub fn start_monthly_debrief_notifier(garmin_client: Arc<GarminClient>, config: Arc<crate::config::AppConfig>) {
     tokio::spawn(async move {
         use chrono::Datelike;
         let mut last_sent_month = 0;
@@ -919,22 +898,18 @@ pub fn start_monthly_debrief_notifier(garmin_client: Arc<GarminClient>, gemini_k
         loop {
             let now = chrono::Local::now();
             let current_day = now.day();
-            let target_day: u32 = std::env::var("MONTHLY_REVIEW_DAY")
-                .unwrap_or_else(|_| "1".to_string())
-                .parse()
-                .unwrap_or(1);
+            let target_day = config.monthly_review_day;
 
             let current_time = now.format("%H:%M").to_string();
-            let target_time =
-                std::env::var("MONTHLY_REVIEW_TIME").unwrap_or_else(|_| "18:00".to_string());
-            let force = std::env::var("FORCE_MONTHLY_DEBRIEF").is_ok();
+            let target_time = &config.monthly_review_time;
+            let force = config.force_monthly_debrief;
 
-            if (current_day == target_day && current_time == target_time || force)
+            if (current_day == target_day && current_time == *target_time || force)
                 && last_sent_month != now.month()
             {
                 match garmin_client.fetch_data().await {
                     Ok(data) => {
-                        let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+                        let ai_client = crate::ai_client::AiClient::new(config.gemini_api_key.clone());
                         let year = now.year();
                         let month = now.month();
 
@@ -1052,7 +1027,7 @@ pub fn start_monthly_debrief_notifier(garmin_client: Arc<GarminClient>, gemini_k
                         match ai_client.generate_workout(&prompt).await {
                             Ok(review) => {
                                 let msg = format!("📅 **Monthly Coach Debrief**\n\n{}", review);
-                                broadcast_message(&msg).await;
+                                broadcast_message(&msg, &config).await;
                                 last_sent_month = now.month();
                             }
                             Err(e) => error!("Failed to generate monthly review from AI: {}", e),

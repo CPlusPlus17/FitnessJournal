@@ -3,6 +3,7 @@ mod api;
 mod bot;
 mod coaching;
 mod db;
+pub mod config;
 mod garmin_api;
 mod garmin_client;
 mod garmin_login;
@@ -49,7 +50,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     info!("Starting Fitness Coach...");
 
-    let database = match Database::new() {
+    info!("Loading AppConfig...");
+    let config: Arc<crate::config::AppConfig> = match crate::config::AppConfig::load() {
+        Ok(c) => {
+            info!("AppConfig loaded successfully: {:?}", c);
+            Arc::new(c)
+        },
+        Err(e) => {
+            error!("Failed to load configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let database = match Database::new(&config) {
         Ok(db) => Arc::new(Mutex::new(db)),
         Err(e) => {
             error!("\n{}", "=".repeat(60));
@@ -190,7 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.test_refresh {
         info!("Testing OAuth2 Token Refresh...");
         let temp_db = Arc::new(Mutex::new(
-            Database::new().expect("Failed to initialize SQLite database"),
+            Database::new(&config).expect("Failed to initialize SQLite database"),
         ));
         let garmin_client_refresh = crate::garmin_client::GarminClient::new(temp_db);
         match garmin_client_refresh.api.refresh_oauth2().await {
@@ -203,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if is_api {
         info!("Starting Fitness Coach in API mode.");
         if let Err(e) =
-            api::run_server(database.clone(), garmin_client.clone(), coach.clone()).await
+            api::run_server(config.clone(), database.clone(), garmin_client.clone(), coach.clone()).await
         {
             error!("API Server crashed: {}", e);
         }
@@ -211,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if is_signal {
-        let bot = bot::BotController::new(garmin_client.clone(), coach.clone(), database.clone());
+        let bot = bot::BotController::new(config.clone(), garmin_client.clone(), coach.clone(), database.clone());
         if is_daemon {
             tokio::spawn(async move {
                 bot.run().await;
@@ -224,28 +237,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_daemon {
         info!("Starting Fitness Coach in DAEMON mode. Will run every 5 minutes.");
-        crate::bot::start_morning_notifier(garmin_client.clone());
-        if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
-            crate::bot::start_weekly_review_notifier(garmin_client.clone(), gemini_key.clone());
-            crate::bot::start_monthly_debrief_notifier(garmin_client.clone(), gemini_key.clone());
-            crate::bot::start_race_readiness_notifier(garmin_client.clone(), gemini_key);
+        crate::bot::start_morning_notifier(garmin_client.clone(), config.clone());
+        if !config.gemini_api_key.is_empty() {
+            crate::bot::start_weekly_review_notifier(garmin_client.clone(), config.clone());
+            crate::bot::start_monthly_debrief_notifier(garmin_client.clone(), config.clone());
+            crate::bot::start_race_readiness_notifier(garmin_client.clone(), config.clone());
         }
         loop {
-            run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
+            run_coach_pipeline(config.clone(), garmin_client.clone(), coach.clone(), database.clone(), false).await?;
             info!("Sleeping for 5 minutes... zzz");
             tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
         }
     } else {
-        run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
+        run_coach_pipeline(config.clone(), garmin_client.clone(), coach.clone(), database.clone(), true).await?;
     }
 
     Ok(())
 }
 
 pub async fn run_coach_pipeline(
+    config: Arc<crate::config::AppConfig>,
     garmin_client: Arc<GarminClient>,
     coach: Arc<Coach>,
     database: Arc<Mutex<Database>>,
+    force_generation: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Fetch Detailed Data from Garmin Connect (Native Rust)
     info!("\nFetching detailed stats from Garmin Connect...");
@@ -291,13 +306,13 @@ pub async fn run_coach_pipeline(
     let (context, auto_analyze_sports) = load_profile_context();
 
     // 4. Auto-Analyze Activities (Signal Cheerleader)
-    if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
+    if !config.gemini_api_key.is_empty() {
         if !auto_analyze_sports.is_empty() {
             auto_analyze_recent_activities(
                 &detailed_activities,
                 &auto_analyze_sports,
                 &database,
-                &gemini_key,
+                &config,
             ).await;
         }
     }
@@ -323,13 +338,25 @@ pub async fn run_coach_pipeline(
     }
 
     // 6. Generate and Publish Plan
-    if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
-        generate_and_publish_plan(
-            &brief,
-            &garmin_client,
-            &database,
-            &gemini_key,
-        ).await;
+    if !config.gemini_api_key.is_empty() {
+        let has_ai_workouts = scheduled_workouts.iter().any(|w| {
+            if let Some(name) = w.title.as_deref() {
+                crate::garmin_client::is_ai_managed_workout(name)
+            } else {
+                false
+            }
+        });
+
+        if force_generation || !has_ai_workouts {
+            generate_and_publish_plan(
+                &brief,
+                &garmin_client,
+                &database,
+                &config,
+            ).await;
+        } else {
+            info!("\nAI Workouts already scheduled. Skipping automatic workout generation.");
+        }
     } else {
         info!("\nNo GEMINI_API_KEY set. Skipping automatic workout generation.");
     }
@@ -432,9 +459,9 @@ async fn auto_analyze_recent_activities(
     detailed_activities: &[crate::models::GarminActivity],
     auto_analyze_sports: &[String],
     database: &Arc<Mutex<Database>>,
-    gemini_key: &str,
+    config: &crate::config::AppConfig,
 ) {
-    let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
+    let ai_client = crate::ai_client::AiClient::new(config.gemini_api_key.clone());
     let db = database.lock().await;
 
     // Only analyze recent activities (from today or yesterday) to avoid spamming 50+ backlogs
@@ -469,7 +496,7 @@ async fn auto_analyze_recent_activities(
                                 act.name.as_deref().unwrap_or("Untitled Workout"),
                                 analysis
                             );
-                            crate::bot::broadcast_message(&msg).await;
+                            crate::bot::broadcast_message(&msg, config).await;
 
                             if let Err(e) =
                                 db.save_activity_analysis(id, &act.start_time, &analysis)
@@ -491,12 +518,12 @@ async fn generate_and_publish_plan(
     brief: &str,
     garmin_client: &Arc<GarminClient>,
     database: &Arc<Mutex<Database>>,
-    gemini_key: &str,
+    config: &crate::config::AppConfig,
 ) {
-    info!("\nGEMINI_API_KEY found! Generating workout via Gemini 3.1 Pro Preview...");
+    info!("\nGEMINI_API_KEY found! Generating workout via Gemini...");
 
     // Initialize AI Client
-    let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
+    let ai_client = crate::ai_client::AiClient::new(config.gemini_api_key.clone());
 
     info!("Cleaning up previously generated workouts before generating a new plan...");
     if let Err(e) = garmin_client.cleanup_ai_workouts().await {
@@ -595,7 +622,7 @@ async fn generate_and_publish_plan(
                             msg.push_str("\n\n");
                             msg.push_str(&scheduled_details.join("\n\n"));
                         }
-                        crate::bot::broadcast_message(&msg).await;
+                        crate::bot::broadcast_message(&msg, config).await;
                     }
 
                     let _ = database.lock().await.clear_garmin_cache();

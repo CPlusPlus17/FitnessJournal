@@ -110,10 +110,10 @@ impl SlidingWindowLimiter {
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub config: Arc<crate::config::AppConfig>,
     database: Arc<Mutex<Database>>,
     garmin_client: Arc<GarminClient>,
     coach: Arc<Coach>,
-    api_auth_token: Option<String>,
     chat_limiter: Arc<Mutex<SlidingWindowLimiter>>,
     generate_limiter: Arc<Mutex<SlidingWindowLimiter>>,
 }
@@ -151,19 +151,9 @@ pub struct RecoveryResponse {
     pub rhr_trend: Vec<i32>,
 }
 
-fn env_usize(var_name: &str, default_value: usize) -> usize {
-    std::env::var(var_name)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(default_value)
-}
-
-fn cors_origins() -> Vec<HeaderValue> {
-    let raw = std::env::var("CORS_ALLOWED_ORIGINS")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
-
+fn cors_origins(raw_origins: &str) -> Vec<HeaderValue> {
     let mut origins = Vec::new();
-    for origin in raw.split(',') {
+    for origin in raw_origins.split(',') {
         let trimmed = origin.trim();
         if trimmed.is_empty() {
             continue;
@@ -337,7 +327,7 @@ async fn auth_middleware(State(state): State<ApiState>, request: Request, next: 
         return next.run(request).await;
     }
 
-    if let Some(expected_token) = &state.api_auth_token {
+    if let Some(expected_token) = &state.config.api_auth_token {
         if !has_valid_api_token(request.headers(), expected_token) {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -354,32 +344,28 @@ async fn auth_middleware(State(state): State<ApiState>, request: Request, next: 
 }
 
 pub async fn run_server(
+    config: Arc<crate::config::AppConfig>,
     database: Arc<Mutex<Database>>,
     garmin_client: Arc<GarminClient>,
     coach: Arc<Coach>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let auth_token = std::env::var("API_AUTH_TOKEN")
-        .ok()
-        .map(|token| token.trim().to_string())
-        .filter(|token| !token.is_empty());
-
     let state = ApiState {
-        database,
-        garmin_client,
-        coach,
-        api_auth_token: auth_token,
         chat_limiter: Arc::new(Mutex::new(SlidingWindowLimiter::new(
-            env_usize("CHAT_RATE_LIMIT_PER_MINUTE", 30),
+            config.chat_rate_limit_per_minute,
             Duration::from_secs(60),
         ))),
         generate_limiter: Arc::new(Mutex::new(SlidingWindowLimiter::new(
-            env_usize("GENERATE_RATE_LIMIT_PER_HOUR", 6),
+            config.generate_rate_limit_per_hour,
             Duration::from_secs(60 * 60),
         ))),
+        config: config.clone(),
+        database,
+        garmin_client,
+        coach,
     };
 
     let cors = CorsLayer::new()
-        .allow_origin(cors_origins())
+        .allow_origin(cors_origins(&config.cors_allowed_origins))
         .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers([
             header::CONTENT_TYPE,
@@ -408,11 +394,10 @@ pub async fn run_server(
         .layer(middleware::from_fn_with_state(state, auth_middleware))
         .layer(cors);
 
-    let bind_addr = std::env::var("API_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3001".to_string());
-    let addr: SocketAddr = bind_addr.parse().map_err(|e| {
+    let addr: SocketAddr = config.api_bind_addr.parse().map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("Invalid API_BIND_ADDR '{}': {}", bind_addr, e),
+            format!("Invalid API_BIND_ADDR '{}': {}", config.api_bind_addr, e),
         )
     })?;
 
@@ -438,9 +423,11 @@ async fn trigger_generate(
     }
 
     match crate::run_coach_pipeline(
+        state.config.clone(),
         state.garmin_client.clone(),
         state.coach.clone(),
         state.database.clone(),
+        true,
     )
     .await
     {
@@ -512,17 +499,18 @@ async fn post_chat(
         ));
     }
 
-    let gemini_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
-        (
+    let gemini_key = &state.config.gemini_api_key;
+    if gemini_key.is_empty() {
+        return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
                 "status": "error",
                 "message": "No API key"
             })),
-        )
-    })?;
+        ));
+    }
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
 
     let history_pairs = state
         .database
@@ -759,20 +747,18 @@ async fn predict_duration(
         }
     }
 
-    let gemini_key = match std::env::var("GEMINI_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": "GEMINI_API_KEY not configured"
-                })),
-            ))
-        }
-    };
+    let gemini_key = &state.config.gemini_api_key;
+    if gemini_key.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "GEMINI_API_KEY not configured"
+            })),
+        ));
+    }
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
     let prompt = format!(
         "Predict the duration in minutes for this workout. Take into account conventional durations for these types of workouts. Return only a plain integer representing minutes, and nothing else (no units, no markdown). If you cannot predict or it's unknown, return 45.\nTitle: {}\nSport: {}\nDescription: {}",
         title, sport, input.description.unwrap_or_default()
@@ -822,20 +808,18 @@ async fn analyze_activity(
         }
     }
 
-    let gemini_key = match std::env::var("GEMINI_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": "GEMINI_API_KEY not configured"
-                })),
-            ))
-        }
-    };
+    let gemini_key = &state.config.gemini_api_key;
+    if gemini_key.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "GEMINI_API_KEY not configured"
+            })),
+        ));
+    }
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key);
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
     let prompt = format!(
         "Please provide an in-depth analysis of this completed fitness activity. Be encouraging but highly analytical.\n\nYou have been provided with the complete, raw JSON payload direct from Garmin. It contains many undocumented fields, extra metrics, recovery data, elevation, stress, cadence, temperatures, or detailed exercise sets.\n\nPlease actively hunt through this raw JSON and surface interesting insights, anomalies, or performance correlations that wouldn't be obvious from just the basic time/distance metrics. Explain what these deeper metrics mean for the athlete's progress.\n\nHere is the raw Garmin activity data in JSON format:\n\n{}",
         serde_json::to_string(&input.activity).unwrap_or_default()
