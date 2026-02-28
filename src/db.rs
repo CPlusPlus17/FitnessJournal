@@ -539,6 +539,24 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_recent_activity_analyses(&self, days: u32) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date, summary FROM activity_analysis 
+             WHERE date >= date('now', ?1)
+             ORDER BY date ASC",
+        )?;
+        let modifier = format!("-{} days", days);
+        let mut rows = stmt.query(params![modifier])?;
+        let mut analyses = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            let date: String = row.get(0)?;
+            let summary: String = row.get(1)?;
+            analyses.push((date, summary));
+        }
+        Ok(analyses)
+    }
+
     pub fn save_recovery_metrics(
         &self,
         metrics: &crate::models::GarminRecoveryMetrics,

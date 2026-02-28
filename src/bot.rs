@@ -227,6 +227,44 @@ impl BotController {
                 "Body Battery: {}\nSleep Score: {}\nToday's Planned Workouts: {}",
                 bb, sleep, planned_str
             );
+
+            // Add recent activities to context
+            let seven_days_ago = (chrono::Local::now() - chrono::Duration::days(7))
+                .format("%Y-%m-%d")
+                .to_string();
+            let recent_activities: Vec<_> = data
+                .activities
+                .iter()
+                .filter(|a| a.start_time >= seven_days_ago)
+                .collect();
+
+            if !recent_activities.is_empty() {
+                context_str.push_str("\n\nRecent Workouts (Last 7 Days):\n");
+                for act in recent_activities {
+                    let name = act.name.as_deref().unwrap_or("Untitled");
+                    let sport = act.get_activity_type().unwrap_or("Unknown");
+                    let date = act.start_time.split('T').next().unwrap_or(&act.start_time);
+                    let dist = act.distance.unwrap_or(0.0) / 1000.0;
+                    let dur_mins = act.duration.unwrap_or(0.0) / 60.0;
+                    context_str.push_str(&format!(
+                        "- {} ({}) | {}: {:.1}km in {:.0} mins\n",
+                        name, sport, date, dist, dur_mins
+                    ));
+                }
+            }
+        }
+
+        // Add recent analyses to context
+        {
+            let db = self.database.lock().await;
+            if let Ok(analyses) = db.get_recent_activity_analyses(7) {
+                if !analyses.is_empty() {
+                    context_str.push_str("\n\nRecent AI Coach Feedback (Last 7 Days):\n");
+                    for (date, summary) in analyses {
+                        context_str.push_str(&format!("- On {}:\n  {}\n", date, summary));
+                    }
+                }
+            }
         }
 
         let ai_client = crate::ai_client::AiClient::new(gemini_key);
