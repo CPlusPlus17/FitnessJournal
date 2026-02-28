@@ -56,7 +56,7 @@ impl GarminClient {
         }
 
         // 2. Fetch Fresh Data natively via Rust GarminApi
-        let activities = match self.api.get_activities(0, 50).await {
+        let activities = match self.api.get_activities(0, 100).await {
             Ok(acts) => acts,
             Err(e) => {
                 error!("Failed to fetch activities from Garmin: {}", e);

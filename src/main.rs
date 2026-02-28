@@ -226,7 +226,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Starting Fitness Coach in DAEMON mode. Will run every 24 hours.");
         crate::bot::start_morning_notifier(garmin_client.clone());
         if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
-            crate::bot::start_weekly_review_notifier(garmin_client.clone(), gemini_key);
+            crate::bot::start_weekly_review_notifier(garmin_client.clone(), gemini_key.clone());
+            crate::bot::start_monthly_debrief_notifier(garmin_client.clone(), gemini_key.clone());
+            crate::bot::start_race_readiness_notifier(garmin_client.clone(), gemini_key);
         }
         loop {
             run_coach_pipeline(garmin_client.clone(), coach.clone(), database.clone()).await?;
@@ -361,7 +363,7 @@ async fn sync_workouts_to_db(
     progression_history
 }
 
-fn load_profile_context() -> (crate::coaching::CoachContext, Vec<String>) {
+pub fn load_profile_context() -> (crate::coaching::CoachContext, Vec<String>) {
     let mut context = crate::coaching::CoachContext {
         goals: vec![
             "Improve Marathon Time (Sub 4h)".to_string(),

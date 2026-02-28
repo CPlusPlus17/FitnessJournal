@@ -387,7 +387,19 @@ impl BotController {
                     }
                 }
             }
-            _ => "Command not recognized. Use /status, /generate, or /macros.".to_string(),
+            "/readiness" => {
+                match self.garmin_client.fetch_data().await {
+                    Ok(data) => {
+                        if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
+                            crate::bot::generate_race_readiness_assessment(&data, &gemini_key).await
+                        } else {
+                            "GEMINI_API_KEY is not set. Cannot run readiness assessment.".to_string()
+                        }
+                    }
+                    Err(e) => format!("Failed to fetch Garmin data: {}", e),
+                }
+            }
+            _ => "Command not recognized. Use /status, /generate, /readiness, or /macros.".to_string(),
         }
     }
 
@@ -721,3 +733,300 @@ pub fn start_weekly_review_notifier(garmin_client: Arc<GarminClient>, gemini_key
         }
     });
 }
+
+pub async fn generate_race_readiness_assessment(data: &crate::models::GarminResponse, gemini_key: &str) -> String {
+    let now = chrono::Local::now();
+    let today_str = now.format("%Y-%m-%d").to_string();
+
+    let mut upcoming_race: Option<crate::models::ScheduledWorkout> = None;
+    for sw in &data.scheduled_workouts {
+        if let Some(ref it) = sw.item_type {
+            if it == "race" || it == "event" || it == "primaryEvent" {
+                if sw.date >= today_str {
+                    if upcoming_race.is_none() || sw.date < upcoming_race.as_ref().unwrap().date {
+                        upcoming_race = Some(sw.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let race = match upcoming_race {
+        Some(r) => r,
+        None => return "No upcoming races or events found in your Garmin calendar.".to_string(),
+    };
+
+    let race_date = match chrono::NaiveDate::parse_from_str(&race.date, "%Y-%m-%d") {
+        Ok(d) => d,
+        Err(_) => return "Found a race but couldn't parse its date.".to_string(),
+    };
+    let today_date = now.naive_local().date();
+    let days_until = (race_date - today_date).num_days();
+
+    let twelve_weeks_ago = now - chrono::Duration::days(84);
+    let twelve_weeks_ago_str = twelve_weeks_ago.format("%Y-%m-%d").to_string();
+
+    let recent_activities: Vec<_> = data.activities.iter().filter(|a| a.start_time >= twelve_weeks_ago_str).collect();
+
+    let total_dur_min: f64 = recent_activities.iter().filter_map(|a| a.duration).sum::<f64>() / 60.0;
+    let total_dist_km: f64 = recent_activities.iter().filter_map(|a| a.distance).sum::<f64>() / 1000.0;
+    let run_count = recent_activities.iter().filter(|a| a.get_activity_type().unwrap_or("").contains("run")).count();
+    let bike_count = recent_activities.iter().filter(|a| a.get_activity_type().unwrap_or("").contains("biking") || a.get_activity_type().unwrap_or("").contains("cycl")).count();
+    let strength_count = recent_activities.iter().filter(|a| a.get_activity_type().unwrap_or("").contains("strength") || a.get_activity_type().unwrap_or("").contains("fitness")).count();
+
+    let mut recovery_str = String::new();
+    if let Some(metrics) = &data.recovery_metrics {
+        if let Some(bb) = metrics.current_body_battery { recovery_str.push_str(&format!("Body Battery: {}\n", bb)); }
+        if let Some(ss) = metrics.sleep_score { recovery_str.push_str(&format!("Sleep Score: {}\n", ss)); }
+        if let Some(hrv) = &metrics.hrv_status { recovery_str.push_str(&format!("HRV Status: {}\n", hrv)); }
+    }
+
+    let prompt = format!(
+        "You are an elite sports coach. The athlete has an upcoming race in {} days!\n\
+        \n=== EVENT DETAILS ===\n\
+        Title: {}\n\
+        Date: {}\n\
+        Sport: {}\n\
+        Distance: {:.1}km\n\
+        \n=== 12-WEEK TRAINING BLOCK HISTORY ===\n\
+        Total Duration: {:.1} hours\n\
+        Total Distance: {:.1} km\n\
+        Frequency: {} runs, {} rides, {} strength sessions\n\
+        \n=== CURRENT RECOVERY ===\n\
+        {}\n\
+        \nProvide a 'Race Readiness Assessment' formatting it directly as text without markdown wrappers.\n\
+        Include:\n\
+        1. A Confidence Score (out of 100%).\n\
+        2. Tapering advice given how many days are left ({} days).\n\
+        3. A high-level pacing or mental strategy based on the distance.\n\
+        Keep it highly encouraging, sharp, and focused purely on this event. Keep it concise enough for a messaging app (max 2-3 short paragraphs).",
+        days_until,
+        race.title.as_deref().unwrap_or("Untitled Event"),
+        race.date,
+        race.sport.as_deref().unwrap_or("Unknown"),
+        race.distance.unwrap_or(0.0),
+        total_dur_min / 60.0,
+        total_dist_km,
+        run_count, bike_count, strength_count,
+        recovery_str,
+        days_until
+    );
+
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
+    match ai_client.generate_workout(&prompt).await {
+        Ok(assessment) => format!("🏁 **Race Readiness Assessment**\n\n{}", assessment),
+        Err(e) => format!("Failed to generate assessment: {}", e),
+    }
+}
+
+pub fn start_race_readiness_notifier(garmin_client: Arc<GarminClient>, gemini_key: String) {
+    tokio::spawn(async move {
+        let mut last_notified_day = String::new();
+
+        loop {
+            let now = chrono::Local::now();
+            let today_str = now.format("%Y-%m-%d").to_string();
+
+            let current_time = now.format("%H:%M").to_string();
+            let target_time = std::env::var("READINESS_MESSAGE_TIME").unwrap_or_else(|_| "08:00".to_string());
+
+            if current_time == target_time && last_notified_day != today_str {
+                match garmin_client.fetch_data().await {
+                    Ok(data) => {
+                        let mut upcoming_race: Option<crate::models::ScheduledWorkout> = None;
+                        for sw in &data.scheduled_workouts {
+                            if let Some(ref it) = sw.item_type {
+                                if it == "race" || it == "event" || it == "primaryEvent" {
+                                    if sw.date >= today_str {
+                                        if upcoming_race.is_none() || sw.date < upcoming_race.as_ref().unwrap().date {
+                                            upcoming_race = Some(sw.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(race) = upcoming_race {
+                            if let Ok(race_date) = chrono::NaiveDate::parse_from_str(&race.date, "%Y-%m-%d") {
+                                let today_date = now.naive_local().date();
+                                let days_until = (race_date - today_date).num_days();
+
+                                if days_until == 14 || days_until == 7 || days_until == 2 {
+                                    let msg = generate_race_readiness_assessment(&data, &gemini_key).await;
+                                    broadcast_message(&msg).await;
+                                }
+                            }
+                        }
+
+                        last_notified_day = today_str;
+                    }
+                    Err(e) => {
+                        error!("Race readiness notifier failed to fetch garmin data: {}", e);
+                    }
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    });
+}
+
+pub fn start_monthly_debrief_notifier(garmin_client: Arc<GarminClient>, gemini_key: String) {
+    tokio::spawn(async move {
+        use chrono::Datelike;
+        let mut last_sent_month = 0;
+
+        loop {
+            let now = chrono::Local::now();
+            let current_day = now.day();
+            let target_day: u32 = std::env::var("MONTHLY_REVIEW_DAY")
+                .unwrap_or_else(|_| "1".to_string())
+                .parse()
+                .unwrap_or(1);
+
+            let current_time = now.format("%H:%M").to_string();
+            let target_time =
+                std::env::var("MONTHLY_REVIEW_TIME").unwrap_or_else(|_| "18:00".to_string());
+            let force = std::env::var("FORCE_MONTHLY_DEBRIEF").is_ok();
+
+            if (current_day == target_day && current_time == target_time || force)
+                && last_sent_month != now.month()
+            {
+                match garmin_client.fetch_data().await {
+                    Ok(data) => {
+                        let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+                        let year = now.year();
+                        let month = now.month();
+
+                        let (last_month_year, last_month) = if month == 1 {
+                            (year - 1, 12)
+                        } else {
+                            (year, month - 1)
+                        };
+
+                        let (prev_month_year, prev_month) = if last_month == 1 {
+                            (last_month_year - 1, 12)
+                        } else {
+                            (last_month_year, last_month - 1)
+                        };
+
+                        let last_month_prefix = format!("{}-{:02}", last_month_year, last_month);
+                        let prev_month_prefix = format!("{}-{:02}", prev_month_year, prev_month);
+
+                        let last_month_activities: Vec<_> = data
+                            .activities
+                            .iter()
+                            .filter(|a| a.start_time.starts_with(&last_month_prefix))
+                            .collect();
+
+                        let prev_month_activities: Vec<_> = data
+                            .activities
+                            .iter()
+                            .filter(|a| a.start_time.starts_with(&prev_month_prefix))
+                            .collect();
+
+                        // Last month volume
+                        let lm_duration_hrs: f64 = last_month_activities
+                            .iter()
+                            .filter_map(|a| a.duration)
+                            .sum::<f64>()
+                            / 3600.0;
+                        let lm_distance_km: f64 = last_month_activities
+                            .iter()
+                            .filter_map(|a| a.distance)
+                            .sum::<f64>()
+                            / 1000.0;
+                        let lm_count = last_month_activities.len();
+
+                        // Prev month volume
+                        let pm_duration_hrs: f64 = prev_month_activities
+                            .iter()
+                            .filter_map(|a| a.duration)
+                            .sum::<f64>()
+                            / 3600.0;
+                        let pm_distance_km: f64 = prev_month_activities
+                            .iter()
+                            .filter_map(|a| a.distance)
+                            .sum::<f64>()
+                            / 1000.0;
+                        let pm_count = prev_month_activities.len();
+
+                        // Strength tracking for 1RM
+                        let mut max_weights = std::collections::HashMap::new();
+                        for act in &last_month_activities {
+                            if let Some(crate::models::GarminSetsData::Details(sets)) = &act.sets {
+                                for set in &sets.exercise_sets {
+                                    if let Some(w) = set.weight {
+                                        for ex in &set.exercises {
+                                            let current_max =
+                                                max_weights.entry(ex.name.clone()).or_insert(0.0);
+                                            if w > *current_max {
+                                                *current_max = w;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        let mut strength_summary = String::new();
+                        let mut max_weights_vec: Vec<_> = max_weights.into_iter().collect();
+                        max_weights_vec.sort_by(|a, b| {
+                            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        for (name, weight) in max_weights_vec.iter().take(10) {
+                            strength_summary.push_str(&format!("- {}: {:.1}kg\n", name, weight));
+                        }
+
+                        let (context, _) = crate::load_profile_context();
+                        let user_goals = if context.goals.is_empty() {
+                            "General Fitness".to_string()
+                        } else {
+                            context.goals.join(", ")
+                        };
+
+                        let prompt = format!(
+                            "You are an elite sports coach. Write a comprehensive Monthly Review to be sent on Signal.\n\
+                            Compare total monthly volume, evaluate progress against the athlete's goals, and suggest focus blocks for the next macrocycle.\n\n\
+                            === ATHLETE GOALS ===\n\
+                            {}\n\n\
+                            === LAST MONTH ({}) ===\n\
+                            Workouts: {}\n\
+                            Total Duration: {:.1} hours\n\
+                            Total Distance: {:.1} km\n\n\
+                            === PREVIOUS MONTH ({}) ===\n\
+                            Workouts: {}\n\
+                            Total Duration: {:.1} hours\n\
+                            Total Distance: {:.1} km\n\n\
+                            === PEAK WEIGHTS LIFTED (LAST MONTH) ===\n\
+                            {}\n\n\
+                            FORMAT:\n\
+                            Keep it encouraging, analytical, and professional. 3-4 paragraphs max.\n\
+                            Provide clear focus blocks for the upcoming month.",
+                            user_goals,
+                            last_month_prefix, lm_count, lm_duration_hrs, lm_distance_km,
+                            prev_month_prefix, pm_count, pm_duration_hrs, pm_distance_km,
+                            if strength_summary.is_empty() { "No strength data recorded.".to_string() } else { strength_summary }
+                        );
+
+                        match ai_client.generate_workout(&prompt).await {
+                            Ok(review) => {
+                                let msg = format!("📅 **Monthly Coach Debrief**\n\n{}", review);
+                                broadcast_message(&msg).await;
+                                last_sent_month = now.month();
+                            }
+                            Err(e) => error!("Failed to generate monthly review from AI: {}", e),
+                        }
+                    }
+                    Err(e) => {
+                        error!("Monthly review notifier failed to fetch garmin data: {}", e);
+                    }
+                }
+            }
+
+            // Sleep for roughly a minute
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    });
+}
+
