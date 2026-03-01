@@ -734,7 +734,6 @@ async fn update_profiles(
 
     let path = profiles_path();
     let mut json_str = serde_json::to_string_pretty(&validated).map_err(|err| {
-    let mut json_str = serde_json::to_string_pretty(&validated).map_err(|err| {
         error!("Failed to serialize {} payload: {}", path, err);
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -783,7 +782,9 @@ async fn predict_duration(
         ));
     }
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+    let gemini_model = std::env::var("GEMINI_MODEL")
+        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
     let prompt = format!(
         "Predict the duration in minutes for this workout. Take into account conventional durations for these types of workouts. Return only a plain integer representing minutes, and nothing else (no units, no markdown). If you cannot predict or it's unknown, return 45.\nTitle: {}\nSport: {}\nDescription: {}",
         title, sport, input.description.unwrap_or_default()
@@ -844,7 +845,9 @@ async fn analyze_activity(
         ));
     }
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone());
+    let gemini_model = std::env::var("GEMINI_MODEL")
+        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
     let prompt = format!(
         "Please provide an in-depth analysis of this completed fitness activity. Be encouraging but highly analytical.\n\nYou have been provided with the complete, raw JSON payload direct from Garmin. It contains many undocumented fields, extra metrics, recovery data, elevation, stress, cadence, temperatures, or detailed exercise sets.\n\nPlease actively hunt through this raw JSON and surface interesting insights, anomalies, or performance correlations that wouldn't be obvious from just the basic time/distance metrics. Explain what these deeper metrics mean for the athlete's progress.\n\nHere is the raw Garmin activity data in JSON format:\n\n{}",
         serde_json::to_string(&input.activity).unwrap_or_default()

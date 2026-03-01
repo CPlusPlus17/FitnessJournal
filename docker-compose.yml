@@ -23,6 +23,8 @@ services:
     environment:
       - TZ=Europe/Zurich
       - RUST_LOG=info
+      - DATABASE_URL=sqlite:///app/data/fitness_journal.db
+      - PROFILES_PATH=/app/data/profiles.json
     depends_on:
       - signal-api
     volumes:
@@ -30,9 +32,6 @@ services:
       - ./data:/app/data
       - ./profiles.json:/app/profiles.json
       - ./.env:/app/.env
-    environment:
-      DATABASE_URL: "sqlite:///app/data/fitness_journal.db"
-      PROFILES_PATH: "/app/data/profiles.json"
     # Run the bot daemon by default
     command: [ "--signal", "--daemon" ]
     restart: unless-stopped

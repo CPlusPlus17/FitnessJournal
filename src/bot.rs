@@ -267,7 +267,9 @@ impl BotController {
             }
         }
 
-        let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
+        let gemini_model = std::env::var("GEMINI_MODEL")
+            .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+        let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string(), gemini_model);
 
         {
             let db = self.database.lock().await;
@@ -673,8 +675,10 @@ pub fn start_weekly_review_notifier(
             {
                 match garmin_client.fetch_data().await {
                     Ok(data) => {
+                        let gemini_model = std::env::var("GEMINI_MODEL")
+                            .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
                         let ai_client =
-                            crate::ai_client::AiClient::new(config.gemini_api_key.clone());
+                            crate::ai_client::AiClient::new(config.gemini_api_key.clone(), gemini_model);
                         let seven_days_ago = now - chrono::Duration::days(7);
                         let seven_days_ago_str = seven_days_ago.format("%Y-%m-%d").to_string();
 
@@ -877,7 +881,9 @@ pub async fn generate_race_readiness_assessment(
         days_until
     );
 
-    let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string());
+    let gemini_model = std::env::var("GEMINI_MODEL")
+        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string(), gemini_model);
     match ai_client.generate_workout(&prompt).await {
         Ok(assessment) => format!("🏁 **Race Readiness Assessment**\n\n{}", assessment),
         Err(e) => format!("Failed to generate assessment: {}", e),
@@ -967,8 +973,10 @@ pub fn start_monthly_debrief_notifier(
             {
                 match garmin_client.fetch_data().await {
                     Ok(data) => {
+                        let gemini_model = std::env::var("GEMINI_MODEL")
+                            .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
                         let ai_client =
-                            crate::ai_client::AiClient::new(config.gemini_api_key.clone());
+                            crate::ai_client::AiClient::new(config.gemini_api_key.clone(), gemini_model);
                         let year = now.year();
                         let month = now.month();
 
