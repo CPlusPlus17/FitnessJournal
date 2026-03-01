@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use tracing::info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,6 +75,7 @@ pub struct AiClient {
 
 impl AiClient {
     pub fn new(api_key: String, model: String) -> Self {
+        info!("Initialized AiClient with model: {}", model);
         AiClient {
             client: Client::new(),
             api_key,
