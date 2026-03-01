@@ -255,10 +255,6 @@ impl WorkoutBuilder {
 
         if let Some(steps) = data.get("steps").and_then(|s| s.as_array()) {
             for step in steps {
-                let raw_name = step
-                    .get("exercise")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("BENCH_PRESS");
                 let phase = step
                     .get("phase")
                     .and_then(|p| p.as_str())
@@ -280,115 +276,145 @@ impl WorkoutBuilder {
                 } else {
                     STEP_TYPE_INTERVAL
                 };
+                
+                let mut sub_exercises = Vec::new();
+                if let Some(arr) = step.get("exercises").and_then(|e| e.as_array()) {
+                    sub_exercises = arr.clone();
+                } else {
+                    sub_exercises.push(step.clone());
+                }
+                
+                let sets = step.get("sets").and_then(|s| s.as_i64()).unwrap_or(1);
+                let use_repeat_group = sets > 1 || sub_exercises.len() > 1;
 
-                let (cat_key, ex_key) = self.resolve_exercise(raw_name);
+                let mut group_steps = Vec::new();
+                
+                // If it's a repeat group, we increment order for the repeat group itself first.
+                let repeat_order = order;
+                if use_repeat_group {
+                    order += 1;
+                }
 
-                let is_unrecognized = cat_key.is_none();
+                for sub_ex in &sub_exercises {
+                    let raw_name = sub_ex
+                        .get("exercise")
+                        .or_else(|| sub_ex.get("name"))
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("BENCH_PRESS");
 
-                let reps = step.get("reps");
-                let duration = step.get("time").or_else(|| step.get("duration"));
+                    let (cat_key, ex_key) = self.resolve_exercise(raw_name);
+                    let is_unrecognized = cat_key.is_none();
 
-                let mut end_cond_id = CONDITION_ID_LAP_BUTTON;
-                let mut end_cond_key = CONDITION_LAP_BUTTON;
-                let mut end_val: Option<Value> = None;
+                    let reps = sub_ex.get("reps").or_else(|| step.get("reps"));
+                    let duration = sub_ex.get("time").or_else(|| step.get("time")).or_else(|| sub_ex.get("duration")).or_else(|| step.get("duration"));
 
-                if let Some(reps_value) = reps {
-                    if step_type_id != STEP_TYPE_ID_WARMUP && step_type_id != STEP_TYPE_ID_COOLDOWN
-                    {
-                        if let Some(r_str) = reps_value.as_str() {
-                            if r_str.to_uppercase().contains("AMRAP") {
-                                end_cond_id = CONDITION_ID_LAP_BUTTON;
-                                end_cond_key = CONDITION_LAP_BUTTON;
-                            } else if let Ok(n) = r_str.parse::<i64>() {
+                    let mut end_cond_id = CONDITION_ID_LAP_BUTTON;
+                    let mut end_cond_key = CONDITION_LAP_BUTTON;
+                    let mut end_val: Option<Value> = None;
+
+                    if let Some(reps_value) = reps {
+                        if step_type_id != STEP_TYPE_ID_WARMUP && step_type_id != STEP_TYPE_ID_COOLDOWN
+                        {
+                            if let Some(r_str) = reps_value.as_str() {
+                                if r_str.to_uppercase().contains("AMRAP") {
+                                    end_cond_id = CONDITION_ID_LAP_BUTTON;
+                                    end_cond_key = CONDITION_LAP_BUTTON;
+                                } else if let Ok(n) = r_str.parse::<i64>() {
+                                    end_val = Some(json!(n));
+                                    end_cond_id = CONDITION_ID_REPS;
+                                    end_cond_key = CONDITION_REPS;
+                                } else {
+                                    end_cond_id = CONDITION_ID_LAP_BUTTON;
+                                    end_cond_key = CONDITION_LAP_BUTTON;
+                                }
+                            } else if let Some(n) = reps_value.as_i64() {
                                 end_val = Some(json!(n));
                                 end_cond_id = CONDITION_ID_REPS;
                                 end_cond_key = CONDITION_REPS;
-                            } else {
-                                end_cond_id = CONDITION_ID_LAP_BUTTON;
-                                end_cond_key = CONDITION_LAP_BUTTON;
                             }
-                        } else if let Some(n) = reps_value.as_i64() {
-                            end_val = Some(json!(n));
-                            end_cond_id = CONDITION_ID_REPS;
-                            end_cond_key = CONDITION_REPS;
+                        }
+                    } else if let Some(d) = duration {
+                        if let Some(sec) = Self::parse_duration(d) {
+                            end_cond_id = CONDITION_ID_TIME;
+                            end_cond_key = CONDITION_TIME;
+                            end_val = Some(json!(sec));
                         }
                     }
-                } else if let Some(d) = duration {
-                    if let Some(sec) = Self::parse_duration(d) {
-                        end_cond_id = CONDITION_ID_TIME;
-                        end_cond_key = CONDITION_TIME;
-                        end_val = Some(json!(sec));
+
+                    let weight_val = sub_ex.get("weight").or_else(|| step.get("weight")).and_then(Self::parse_weight);
+
+                    let mut category_obj = cat_key.clone().map(|c| json!(c));
+                    let mut exercise_name_obj = ex_key.clone().map(|e| json!(e));
+
+                    let note = sub_ex.get("note").or_else(|| step.get("note")).and_then(|n| n.as_str()).unwrap_or("");
+
+                    let mut description = if note.is_empty() {
+                        None
+                    } else {
+                        Some(note.to_string())
+                    };
+
+                    if robust || is_unrecognized {
+                        category_obj = None;
+                        exercise_name_obj = None;
+                        let mut desc = format!("Exercise: {}. {}", raw_name, note);
+                        if let Some(w) = weight_val {
+                            desc.push_str(&format!(" Target: {}kg", w));
+                        }
+                        description = Some(desc.trim().to_string());
                     }
-                }
+                    
+                    let mut step_dict = json!({
+                        "type": "ExecutableStepDTO",
+                        "stepOrder": order,
+                        "stepType": {
+                            "stepTypeId": step_type_id,
+                            "stepTypeKey": step_type_key,
+                        },
+                        "childStepId": null,
+                        "description": description.clone(),
+                        "endCondition": {
+                            "conditionTypeId": end_cond_id,
+                            "conditionTypeKey": end_cond_key,
+                        },
+                        "endConditionValue": end_val.clone(),
+                        "targetType": {
+                            "workoutTargetTypeId": TARGET_ID_NO_TARGET,
+                            "workoutTargetTypeKey": TARGET_NO_TARGET,
+                        },
+                        "category": category_obj.clone(),
+                        "exerciseName": exercise_name_obj.clone(),
+                    });
 
-                let weight_val = step.get("weight").and_then(Self::parse_weight);
-
-                let mut category_obj = cat_key.clone().map(|c| json!(c));
-                let mut exercise_name_obj = ex_key.clone().map(|e| json!(e));
-
-                let note = step.get("note").and_then(|n| n.as_str()).unwrap_or("");
-
-                let mut description = if note.is_empty() {
-                    None
-                } else {
-                    Some(note.to_string())
-                };
-
-                if robust || is_unrecognized {
-                    category_obj = None;
-                    exercise_name_obj = None;
-                    let mut desc = format!("Exercise: {}. {}", raw_name, note);
                     if let Some(w) = weight_val {
-                        desc.push_str(&format!(" Target: {}kg", w));
-                    }
-                    description = Some(desc.trim().to_string());
-                }
-
-                let mut step_dict = json!({
-                    "type": "ExecutableStepDTO",
-                    "stepOrder": order,
-                    "stepType": {
-                        "stepTypeId": step_type_id,
-                        "stepTypeKey": step_type_key,
-                    },
-                    "childStepId": null,
-                    "description": description,
-                    "endCondition": {
-                        "conditionTypeId": end_cond_id,
-                        "conditionTypeKey": end_cond_key,
-                    },
-                    "endConditionValue": end_val,
-                    "targetType": {
-                        "workoutTargetTypeId": TARGET_ID_NO_TARGET,
-                        "workoutTargetTypeKey": TARGET_NO_TARGET,
-                    },
-                    "category": category_obj,
-                    "exerciseName": exercise_name_obj,
-                });
-
-                if let Some(w) = weight_val {
-                    if !robust {
-                        if let Some(step_obj) = step_dict.as_object_mut() {
-                            step_obj.insert("weightValue".to_string(), json!(w));
-                            step_obj.insert(
-                                "weightUnit".to_string(),
-                                json!({
-                                    "unitId": UNIT_ID_KILOGRAM,
-                                    "unitKey": UNIT_KILOGRAM,
-                                    "factor": 1000.0
-                                }),
-                            );
+                        if !robust {
+                            if let Some(step_obj) = step_dict.as_object_mut() {
+                                step_obj.insert("weightValue".to_string(), json!(w));
+                                step_obj.insert(
+                                    "weightUnit".to_string(),
+                                    json!({
+                                        "unitId": UNIT_ID_KILOGRAM,
+                                        "unitKey": UNIT_KILOGRAM,
+                                        "factor": 1000.0
+                                    }),
+                                );
+                            }
                         }
                     }
+                    
+                    if use_repeat_group {
+                        group_steps.push(step_dict);
+                    } else {
+                        steps_payload.push(step_dict);
+                    }
+                    order += 1;
                 }
-
-                steps_payload.push(step_dict);
-                order += 1;
-
+                
+                // Add rest if specified (only at the end of the block/superset)
                 if step_type_id == STEP_TYPE_ID_INTERVAL {
                     if let Some(rest) = step.get("rest") {
                         if let Some(rest_sec) = Self::parse_duration(rest) {
-                            steps_payload.push(json!({
+                            let rest_step = json!({
                                 "type": "ExecutableStepDTO",
                                 "stepOrder": order,
                                 "stepType": {
@@ -405,10 +431,31 @@ impl WorkoutBuilder {
                                     "workoutTargetTypeId": TARGET_ID_NO_TARGET,
                                     "workoutTargetTypeKey": TARGET_NO_TARGET,
                                 }
-                            }));
+                            });
+                            
+                            if use_repeat_group {
+                                group_steps.push(rest_step);
+                            } else {
+                                steps_payload.push(rest_step);
+                            }
                             order += 1;
                         }
                     }
+                }
+                
+                if use_repeat_group {
+                    let repeat_step = json!({
+                        "type": "RepeatGroupDTO",
+                        "stepOrder": repeat_order,
+                        "stepType": {
+                            "stepTypeId": 6,
+                            "stepTypeKey": "repeat"
+                        },
+                        "numberOfIterations": sets,
+                        "smartRepeat": false,
+                        "workoutSteps": group_steps
+                    });
+                    steps_payload.push(repeat_step);
                 }
             }
         }
@@ -439,6 +486,7 @@ impl WorkoutBuilder {
         })
     }
 }
+
 
 #[cfg(test)]
 mod tests {

@@ -100,7 +100,7 @@ impl AiClient {
 
     pub async fn generate_workout(&self, prompt: &str) -> Result<String> {
         let mut sys_text =
-            "You are an elite Multi-Sport Coach. Follow instructions precisely.".to_string();
+            "You are an elite Multi-Sport Coach. Follow instructions precisely. When creating a structured workout, incorporate supersets whenever possible. Use 'sets' and 'reps' for multiple iterations of an exercise. To represent a superset, group the multiple exercises into an 'exercises' array inside the workout step, specifying 'reps' and 'weight' for each sub-exercise, and 'sets' at the top step level.".to_string();
         sys_text.push_str(&Self::get_valid_exercises_string());
 
         let request_body = GeminiRequest {
@@ -185,7 +185,7 @@ impl AiClient {
             });
         }
 
-        let mut sys_instruction = "You are an elite Multi-Sport Coach. Follow instructions precisely. The user is asking questions about the generated workout plan, their Garmin health metrics, or fitness in general. You will respond as the coach in a friendly and conversational, yet brief manner.\nIf you decide to actively add or reschedule a workout for the athlete, YOU MUST output a raw JSON codeblock starting with ```json containing an array of Garmin workout objects. Use the exact formats expected representing phase, exercise, weight, sets, reps etc.\nALWAYS reply with natural conversation along with the json block if adding a workout.".to_string();
+        let mut sys_instruction = "You are an elite Multi-Sport Coach. Follow instructions precisely. The user is asking questions about the generated workout plan, their Garmin health metrics, or fitness in general. You will respond as the coach in a friendly and conversational, yet brief manner.\nIf you decide to actively add or reschedule a workout for the athlete, YOU MUST output a raw JSON codeblock starting with ```json containing an array of Garmin workout objects. Use the exact formats expected representing phase, exercise, weight, sets, reps etc.\nWhen creating a structured workout, incorporate supersets whenever possible. Use 'sets' and 'reps' for multiple iterations of an exercise. To represent a superset, group the multiple exercises into an 'exercises' array inside the workout step, specifying 'reps' and 'weight' for each sub-exercise, and 'sets' at the top step level.\nALWAYS reply with natural conversation along with the json block if adding a workout.".to_string();
 
         if let Some(ctx) = context {
             sys_instruction.push_str("\n\n=== LIVE ATHLETE CONTEXT ===\n");
