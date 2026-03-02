@@ -10,6 +10,7 @@ const ALLOWED_PATHS = new Set([
   'generate',
   'profiles',
   'analyze',
+  'analyze/upcoming',
   'force-pull',
 ]);
 

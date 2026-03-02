@@ -501,6 +501,36 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_upcoming_analysis(&self, cache_key: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT value FROM kv_store WHERE key = ?1")?;
+        let key = format!("upcoming_analysis:{}", cache_key);
+        let mut rows = stmt.query([key])?;
+        if let Some(row) = rows.next()? {
+            let value: String = row.get(0)?;
+            return Ok(Some(value));
+        }
+        Ok(None)
+    }
+
+    pub fn set_upcoming_analysis(&self, cache_key: &str, analysis: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let key = format!("upcoming_analysis:{}", cache_key);
+        self.conn.execute(
+            "INSERT INTO kv_store (key, value, updated_at) 
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET 
+             value = excluded.value, 
+             updated_at = excluded.updated_at",
+            params![key, analysis, now],
+        )?;
+        Ok(())
+    }
+
     pub fn is_activity_analyzed(&self, activity_id: i64) -> Result<bool> {
         let mut stmt = self
             .conn

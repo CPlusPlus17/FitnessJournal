@@ -4,6 +4,7 @@ import GenerateButton from './GenerateButton';
 import MuscleMap from './MuscleMap';
 import Chat from './Chat';
 import AnalyzeButton from './AnalyzeButton';
+import AnalyzeUpcomingButton from './AnalyzeUpcomingButton';
 import ForcePullButton from './ForcePullButton';
 import RecoveryHistoryChart, { RecoveryHistoryEntry } from './RecoveryHistoryChart';
 
@@ -512,6 +513,7 @@ export default async function Dashboard() {
                       <span className="text-gray-500">{workout.sport}</span>
                     )}
                   </div>
+                  {isPrimary && <AnalyzeUpcomingButton workout={workout} />}
                 </div>
               );
             })}

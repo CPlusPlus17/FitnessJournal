@@ -54,6 +54,12 @@ pub struct PredictDurationInput {
     pub description: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct AnalyzeUpcomingInput {
+    pub workout: crate::models::ScheduledWorkout,
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProfileConfigPayload {
@@ -388,6 +394,7 @@ pub async fn run_server(
             axum::routing::post(predict_duration),
         )
         .route("/api/analyze", axum::routing::post(analyze_activity))
+        .route("/api/analyze/upcoming", axum::routing::post(analyze_upcoming_event))
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
         .route("/api/profiles", get(get_profiles).put(update_profiles))
@@ -895,6 +902,104 @@ async fn force_pull_data(
             "status": "success",
             "message": "Data successfully force-pulled from Garmin."
         }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            })),
+        )),
+    }
+}
+
+async fn analyze_upcoming_event(
+    State(state): State<ApiState>,
+    Json(input): Json<AnalyzeUpcomingInput>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let workout = input.workout;
+    let gemini_key = &state.config.gemini_api_key;
+    if gemini_key.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "GEMINI_API_KEY not configured"
+            })),
+        ));
+    }
+
+    let gemini_model = std::env::var("GEMINI_MODEL")
+        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
+
+    // Provide context
+    let mut context_str = String::new();
+    if let Ok(data) = state.garmin_client.fetch_data().await {
+        if let Some(metrics) = data.recovery_metrics {
+            if let Ok(json) = serde_json::to_string(&metrics) {
+                context_str.push_str(&format!("Current Recovery Metrics: {}\n\n", json));
+            }
+        }
+        if let Some(profile) = data.user_profile {
+            if let Ok(json) = serde_json::to_string(&profile) {
+                context_str.push_str(&format!("User Profile: {}\n\n", json));
+            }
+        }
+        if let Some(max_metrics) = data.max_metrics {
+            if let Ok(json) = serde_json::to_string(&max_metrics) {
+                context_str.push_str(&format!("Max Metrics: {}\n\n", json));
+            }
+        }
+        
+        let recent_activities: Vec<_> = data.activities.iter().take(15).collect();
+        if let Ok(json) = serde_json::to_string(&recent_activities) {
+            context_str.push_str(&format!("Recent 15 Activities: {}\n\n", json));
+        }
+
+        let upcoming_workouts: Vec<_> = data.scheduled_workouts.iter().filter(|w| w.date < workout.date).collect();
+        if let Ok(json) = serde_json::to_string(&upcoming_workouts) {
+            context_str.push_str(&format!("Upcoming Workouts before event: {}\n\n", json));
+        }
+    }
+
+    let workout_json = serde_json::to_string(&workout).unwrap_or_default();
+
+    let cache_key = format!("{}|{}|{}", workout.date, workout.title.as_deref().unwrap_or_default(), workout.sport.as_deref().unwrap_or_default());
+    
+    // Check DB first
+    {
+        let db = state.database.lock().await;
+        if let Ok(Some(existing_analysis)) = db.get_upcoming_analysis(&cache_key) {
+            return Ok(Json(serde_json::json!({
+                "analysis": existing_analysis
+            })));
+        }
+    }
+
+    let prompt = format!(
+        "Please provide an in-depth analysis of this upcoming primary event/race.
+You have been provided with the event details as well as the athlete's current state of preparation.
+Evaluate their current state of preparation, projected readiness for the event, what they can expect to achieve based on their recent performance and metrics (VO2 Max, Recent Activities, Recovery, etc.), and provide any strategic race-day advice or tapering suggestions.
+CRITICAL INSTRUCTION: DO NOT generate, suggest, or output any new workouts or JSON workout blocks. Only provide the text analysis.
+
+Here is the upcoming event:
+{}
+
+Here is the athlete's current state of preparation context:
+{}",
+        workout_json, context_str
+    );
+
+    match ai_client.generate_workout(&prompt).await {
+        Ok(text) => {
+            {
+                let db = state.database.lock().await;
+                let _ = db.set_upcoming_analysis(&cache_key, &text);
+            }
+            Ok(Json(serde_json::json!({
+                "analysis": text
+            })))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
