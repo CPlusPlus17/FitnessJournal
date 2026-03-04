@@ -1,12 +1,18 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Body, { ExtendedBodyPart } from '@mjcdev/react-body-highlighter';
 
 type MuscleMapItem = {
     name: string;
     muscles: string[];
     frequency: number;
+};
+
+type TooltipInfo = {
+    muscle: string;
+    exercises: { name: string; frequency: number }[];
+    totalSets: number;
 };
 
 // Adjust color scale to be from yellow/orange to deep red based on frequency of active sets
@@ -24,10 +30,30 @@ const FATIGUE_COLORS = [
     "#7f1d1d", // red-900
 ];
 
+/** Convert GARMIN_CATEGORY to Title Case, e.g. BENCH_PRESS → Bench Press */
+function formatExerciseName(name: string): string {
+    return name
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+}
+
+/** Convert slug like upper-back → Upper Back */
+function formatMuscleName(slug: string): string {
+    return slug
+        .split('-')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
 export default function MuscleMap() {
     const [data, setData] = useState<MuscleMapItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [gender, setGender] = useState<'male' | 'female'>('male');
+    const [tooltipInfo, setTooltipInfo] = useState<TooltipInfo | null>(null);
+    const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    const tooltipRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         async function fetchData() {
@@ -46,14 +72,6 @@ export default function MuscleMap() {
         fetchData();
     }, []);
 
-    if (loading) {
-        return (
-            <div className="glass-panel p-6 flex items-center justify-center min-h-[300px]">
-                <div className="text-gray-400 animate-pulse">Loading Muscle Heatmap...</div>
-            </div>
-        );
-    }
-
     // Map old muscle names to the new package's accepted slugs
     const slugMap: Record<string, string> = {
         'front-deltoids': 'deltoids',
@@ -61,6 +79,24 @@ export default function MuscleMap() {
         'adductor': 'adductors',
         'abductors': 'adductors',
     };
+
+    // Build reverse lookup: mapped muscle slug → exercises that trained it
+    const muscleToExercises = useMemo(() => {
+        const map: Record<string, { name: string; frequency: number }[]> = {};
+        data.forEach(item => {
+            item.muscles.forEach(muscle => {
+                const mappedSlug = slugMap[muscle] || muscle;
+                if (!map[mappedSlug]) {
+                    map[mappedSlug] = [];
+                }
+                map[mappedSlug].push({
+                    name: formatExerciseName(item.name),
+                    frequency: item.frequency,
+                });
+            });
+        });
+        return map;
+    }, [data]);
 
     // Aggregate frequencies per muscle
     const muscleFrequencies: Record<string, number> = {};
@@ -73,13 +109,66 @@ export default function MuscleMap() {
     });
 
     const bodyParts: ExtendedBodyPart[] = Object.entries(muscleFrequencies).map(([slug, freq]) => {
-        // Find correct mapping to intensity (1 to 10 for FATIGUE_COLORS array length 10)
         const intensityStr = Math.min(Math.max(1, freq), 10);
         return {
             slug: slug as ExtendedBodyPart['slug'],
             intensity: intensityStr
         };
     });
+
+    // Use native DOM events to detect hover on SVG paths — React synthetic events
+    // don't always bubble correctly from third-party SVG components.
+    useEffect(() => {
+        const wrapper = wrapperRef.current;
+        if (!wrapper || Object.keys(muscleToExercises).length === 0) return;
+
+        const handleMouseMove = (e: MouseEvent) => {
+            const target = e.target as Element;
+            // Walk up the DOM to find an element with an `id` matching a known muscle
+            let current: Element | null = target;
+            let slug: string | null = null;
+            while (current && current instanceof Element) {
+                const id = current.getAttribute('id');
+                if (id && muscleToExercises[id]) {
+                    slug = id;
+                    break;
+                }
+                current = current.parentElement;
+            }
+
+            if (slug) {
+                const exercises = muscleToExercises[slug];
+                const totalSets = exercises.reduce((sum, ex) => sum + ex.frequency, 0);
+                const rect = wrapper.getBoundingClientRect();
+                setTooltipPos({
+                    x: e.clientX - rect.left + 16,
+                    y: e.clientY - rect.top - 8,
+                });
+                setTooltipInfo({ muscle: slug, exercises, totalSets });
+            } else {
+                setTooltipInfo(null);
+            }
+        };
+
+        const handleMouseLeave = () => {
+            setTooltipInfo(null);
+        };
+
+        wrapper.addEventListener('mousemove', handleMouseMove);
+        wrapper.addEventListener('mouseleave', handleMouseLeave);
+        return () => {
+            wrapper.removeEventListener('mousemove', handleMouseMove);
+            wrapper.removeEventListener('mouseleave', handleMouseLeave);
+        };
+    }, [muscleToExercises]);
+
+    if (loading) {
+        return (
+            <div className="glass-panel p-6 flex items-center justify-center min-h-[300px]">
+                <div className="text-gray-400 animate-pulse">Loading Muscle Heatmap...</div>
+            </div>
+        );
+    }
 
     return (
         <div className="glass-panel p-6">
@@ -106,11 +195,10 @@ export default function MuscleMap() {
                 </div>
             </div>
 
-            {/* 
-        The component svgStyle handles making it fit into the design.
-        We provide a dark body color to match the dashboard's aesthetic.
-      */}
-            <div className="flex flex-col md:flex-row items-center justify-center gap-12 w-full">
+            <div
+                ref={wrapperRef}
+                className="relative flex flex-col md:flex-row items-center justify-center gap-12 w-full"
+            >
                 <div className="flex flex-col items-center w-full max-w-[250px]">
                     <h4 className="text-sm font-medium text-gray-400 mb-4 tracking-wider uppercase">Anterior (Front)</h4>
                     <Body
@@ -130,6 +218,48 @@ export default function MuscleMap() {
                         colors={FATIGUE_COLORS}
                     />
                 </div>
+
+                {/* Hover tooltip */}
+                {tooltipInfo && (
+                    <div
+                        ref={tooltipRef}
+                        className="pointer-events-none absolute z-50"
+                        style={{
+                            left: tooltipPos.x,
+                            top: tooltipPos.y,
+                            transform: 'translateY(-100%)',
+                        }}
+                    >
+                        <div
+                            className="rounded-xl px-4 py-3 shadow-2xl border border-white/10 min-w-[180px]"
+                            style={{
+                                background: 'rgba(10, 10, 30, 0.92)',
+                                backdropFilter: 'blur(16px)',
+                                WebkitBackdropFilter: 'blur(16px)',
+                            }}
+                        >
+                            <div className="text-sm font-semibold text-white mb-2 tracking-tight">
+                                {formatMuscleName(tooltipInfo.muscle)}
+                            </div>
+                            <div className="space-y-1">
+                                {tooltipInfo.exercises.map((ex, i) => (
+                                    <div key={i} className="flex items-center justify-between gap-4 text-xs">
+                                        <span className="text-gray-300">{ex.name}</span>
+                                        <span className="text-gray-500 tabular-nums whitespace-nowrap">
+                                            {ex.frequency} {ex.frequency === 1 ? 'set' : 'sets'}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-xs">
+                                <span className="text-gray-400">Total</span>
+                                <span className="text-red-400 font-medium tabular-nums">
+                                    {tooltipInfo.totalSets} {tooltipInfo.totalSets === 1 ? 'set' : 'sets'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {
@@ -139,6 +269,6 @@ export default function MuscleMap() {
                     </div>
                 )
             }
-        </div >
+        </div>
     );
 }

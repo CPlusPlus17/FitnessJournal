@@ -26,6 +26,15 @@ impl Database {
     pub fn new(config: &crate::config::AppConfig) -> Result<Self> {
         let conn = Connection::open(config.database_url.replace("sqlite://", ""))?;
 
+        // Prevent SQLite WAL corruption on Docker bind mounts (macOS VirtioFS).
+        // DELETE journal mode avoids SHM/WAL files that corrupt across container boundaries.
+        // busy_timeout handles concurrent access from fitness-coach + fitness-api containers.
+        conn.execute_batch(
+            "PRAGMA journal_mode = DELETE;
+             PRAGMA synchronous = FULL;
+             PRAGMA busy_timeout = 5000;",
+        )?;
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS exercise_history (
                 id INTEGER PRIMARY KEY,

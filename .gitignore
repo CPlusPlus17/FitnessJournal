@@ -14,3 +14,4 @@ profiles.json
 dump.json
 today.json
 .DS_Store
+data/*
