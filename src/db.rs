@@ -6,6 +6,8 @@ const MAX_CHAT_MESSAGE_LEN: usize = 65_536;
 
 pub type TrendHistoryItem = (f64, i32, String);
 pub type ProgressionHistoryEntry = (String, f64, i32, String, Vec<TrendHistoryItem>);
+/// (exercise_name, this_week_best_weight, this_week_best_reps, last_week_best_weight, last_week_best_reps)
+pub type WeeklyDelta = (String, f64, i32, f64, i32);
 
 #[derive(serde::Serialize)]
 pub struct RecoveryHistoryEntry {
@@ -623,6 +625,78 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    /// Returns the last coach brief's AI response text (the previous plan), if any.
+    pub fn get_last_coach_plan_response(&self) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT response FROM coach_briefs ORDER BY id DESC LIMIT 1")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            let response: String = row.get(0)?;
+            return Ok(Some(response));
+        }
+        Ok(None)
+    }
+
+    /// Returns week-over-week progression deltas for each exercise.
+    /// Format: (exercise_name, this_week_best_weight, this_week_best_reps, last_week_best_weight, last_week_best_reps)
+    pub fn get_weekly_progression_deltas(
+        &self,
+        this_week_start: &str,
+        last_week_start: &str,
+    ) -> Result<Vec<WeeklyDelta>> {
+        let mut result: std::collections::BTreeMap<String, (f64, i32, f64, i32)> =
+            std::collections::BTreeMap::new();
+
+        // This week bests
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT exercise_name, weight, reps FROM (
+                    SELECT exercise_name, weight, reps,
+                           ROW_NUMBER() OVER (PARTITION BY exercise_name ORDER BY weight DESC, reps DESC) AS rn
+                    FROM exercise_history
+                    WHERE date >= ?1
+                ) WHERE rn = 1",
+            )?;
+            let mut rows = stmt.query(rusqlite::params![this_week_start])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(0)?;
+                let weight: f64 = row.get(1)?;
+                let reps: i32 = row.get(2)?;
+                let entry = result.entry(name).or_insert((0.0, 0, 0.0, 0));
+                entry.0 = weight;
+                entry.1 = reps;
+            }
+        }
+
+        // Last week bests
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT exercise_name, weight, reps FROM (
+                    SELECT exercise_name, weight, reps,
+                           ROW_NUMBER() OVER (PARTITION BY exercise_name ORDER BY weight DESC, reps DESC) AS rn
+                    FROM exercise_history
+                    WHERE date >= ?1 AND date < ?2
+                ) WHERE rn = 1",
+            )?;
+            let mut rows = stmt.query(rusqlite::params![last_week_start, this_week_start])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(0)?;
+                let weight: f64 = row.get(1)?;
+                let reps: i32 = row.get(2)?;
+                let entry = result.entry(name).or_insert((0.0, 0, 0.0, 0));
+                entry.2 = weight;
+                entry.3 = reps;
+            }
+        }
+
+        Ok(result
+            .into_iter()
+            .filter(|(_, (tw, _, lw, _))| *tw > 0.0 || *lw > 0.0)
+            .map(|(name, (tw, tr, lw, lr))| (name, tw, tr, lw, lr))
+            .collect())
     }
 
     pub fn get_recovery_history(&self, days: u32) -> Result<Vec<RecoveryHistoryEntry>> {

@@ -59,7 +59,6 @@ pub struct AnalyzeUpcomingInput {
     pub workout: crate::models::ScheduledWorkout,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProfileConfigPayload {
@@ -394,7 +393,10 @@ pub async fn run_server(
             axum::routing::post(predict_duration),
         )
         .route("/api/analyze", axum::routing::post(analyze_activity))
-        .route("/api/analyze/upcoming", axum::routing::post(analyze_upcoming_event))
+        .route(
+            "/api/analyze/upcoming",
+            axum::routing::post(analyze_upcoming_event),
+        )
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
         .route("/api/profiles", get(get_profiles).put(update_profiles))
@@ -519,8 +521,8 @@ async fn post_chat(
         ));
     }
 
-    let gemini_model = std::env::var("GEMINI_MODEL")
-        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
 
     {
         let db = state.database.lock().await;
@@ -536,8 +538,6 @@ async fn post_chat(
     }
 
     let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
-
-
 
     let history_pairs = state
         .database
@@ -789,8 +789,8 @@ async fn predict_duration(
         ));
     }
 
-    let gemini_model = std::env::var("GEMINI_MODEL")
-        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
     let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
     let prompt = format!(
         "Predict the duration in minutes for this workout. Take into account conventional durations for these types of workouts. Return only a plain integer representing minutes, and nothing else (no units, no markdown). If you cannot predict or it's unknown, return 45.\nTitle: {}\nSport: {}\nDescription: {}",
@@ -852,8 +852,8 @@ async fn analyze_activity(
         ));
     }
 
-    let gemini_model = std::env::var("GEMINI_MODEL")
-        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
     let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
     let prompt = format!(
         "Please provide an in-depth analysis of this completed fitness activity. Be encouraging but highly analytical.\n\nYou have been provided with the complete, raw JSON payload direct from Garmin. It contains many undocumented fields, extra metrics, recovery data, elevation, stress, cadence, temperatures, or detailed exercise sets.\n\nPlease actively hunt through this raw JSON and surface interesting insights, anomalies, or performance correlations that wouldn't be obvious from just the basic time/distance metrics. Explain what these deeper metrics mean for the athlete's progress.\n\nHere is the raw Garmin activity data in JSON format:\n\n{}",
@@ -928,8 +928,8 @@ async fn analyze_upcoming_event(
         ));
     }
 
-    let gemini_model = std::env::var("GEMINI_MODEL")
-        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
     let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
 
     // Provide context
@@ -950,13 +950,17 @@ async fn analyze_upcoming_event(
                 context_str.push_str(&format!("Max Metrics: {}\n\n", json));
             }
         }
-        
+
         let recent_activities: Vec<_> = data.activities.iter().take(15).collect();
         if let Ok(json) = serde_json::to_string(&recent_activities) {
             context_str.push_str(&format!("Recent 15 Activities: {}\n\n", json));
         }
 
-        let upcoming_workouts: Vec<_> = data.scheduled_workouts.iter().filter(|w| w.date < workout.date).collect();
+        let upcoming_workouts: Vec<_> = data
+            .scheduled_workouts
+            .iter()
+            .filter(|w| w.date < workout.date)
+            .collect();
         if let Ok(json) = serde_json::to_string(&upcoming_workouts) {
             context_str.push_str(&format!("Upcoming Workouts before event: {}\n\n", json));
         }
@@ -964,8 +968,13 @@ async fn analyze_upcoming_event(
 
     let workout_json = serde_json::to_string(&workout).unwrap_or_default();
 
-    let cache_key = format!("{}|{}|{}", workout.date, workout.title.as_deref().unwrap_or_default(), workout.sport.as_deref().unwrap_or_default());
-    
+    let cache_key = format!(
+        "{}|{}|{}",
+        workout.date,
+        workout.title.as_deref().unwrap_or_default(),
+        workout.sport.as_deref().unwrap_or_default()
+    );
+
     // Check DB first
     {
         let db = state.database.lock().await;

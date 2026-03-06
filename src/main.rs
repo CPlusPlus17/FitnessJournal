@@ -13,6 +13,7 @@ mod workout_builder;
 use crate::coaching::Coach;
 use crate::db::Database;
 use crate::garmin_client::GarminClient;
+use chrono::Datelike;
 use clap::Parser;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -353,7 +354,51 @@ pub async fn run_coach_pipeline(
         .await;
     }
 
-    // 5. Generate Brief
+    // 5. Fetch coaching memory data from DB
+    let previous_plan_response = database
+        .lock()
+        .await
+        .get_last_coach_plan_response()
+        .unwrap_or(None);
+
+    let recent_analyses = database
+        .lock()
+        .await
+        .get_recent_activity_analyses(7)
+        .unwrap_or_default();
+
+    // Compute week boundaries for progression deltas
+    let now_local = chrono::Local::now();
+    let week_start_chrono = match config.week_start_day.as_str() {
+        "Mon" => chrono::Weekday::Mon,
+        "Tue" => chrono::Weekday::Tue,
+        "Wed" => chrono::Weekday::Wed,
+        "Thu" => chrono::Weekday::Thu,
+        "Fri" => chrono::Weekday::Fri,
+        "Sat" => chrono::Weekday::Sat,
+        "Sun" => chrono::Weekday::Sun,
+        _ => chrono::Weekday::Mon,
+    };
+    let today_weekday = now_local.date_naive().weekday();
+    let days_since_week_start = (today_weekday.num_days_from_monday() as i64
+        - week_start_chrono.num_days_from_monday() as i64
+        + 7)
+        % 7;
+    let this_week_start = now_local.date_naive() - chrono::Duration::days(days_since_week_start);
+    let last_week_start = this_week_start - chrono::Duration::days(7);
+    let this_week_start_str = this_week_start.format("%Y-%m-%d").to_string();
+    let last_week_start_str = last_week_start.format("%Y-%m-%d").to_string();
+
+    let weekly_deltas = database
+        .lock()
+        .await
+        .get_weekly_progression_deltas(&this_week_start_str, &last_week_start_str)
+        .unwrap_or_default();
+
+    // Build adherence summary: compare generated_workouts.json against exercise_history
+    let adherence_summary = build_adherence_summary(&detailed_activities, &config.week_start_day);
+
+    // 6. Generate Brief
     info!("\nGenerating Coach Brief...");
     let brief = coach.generate_brief(crate::coaching::BriefInput {
         detailed_activities: &detailed_activities,
@@ -365,6 +410,10 @@ pub async fn run_coach_pipeline(
         context: &context,
         progression_history: &progression_history,
         week_start_day: &config.week_start_day,
+        previous_plan_response: &previous_plan_response,
+        recent_analyses: &recent_analyses,
+        adherence_summary: &adherence_summary,
+        weekly_deltas: &weekly_deltas,
     });
 
     info!("Coach brief generated ({} characters).", brief.len());
@@ -465,7 +514,8 @@ pub fn load_profile_context() -> (crate::coaching::CoachContext, Vec<String>) {
     let mut auto_analyze_sports = Vec::new();
 
     // Load active profile from profiles.json
-    let profiles_path = std::env::var("PROFILES_PATH").unwrap_or_else(|_| "data/profiles.json".to_string());
+    let profiles_path =
+        std::env::var("PROFILES_PATH").unwrap_or_else(|_| "data/profiles.json".to_string());
     if let Ok(profile_data) = std::fs::read_to_string(&profiles_path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&profile_data) {
             if let Some(active_name) = json.get("active_profile").and_then(|v| v.as_str()) {
@@ -518,14 +568,163 @@ pub fn load_profile_context() -> (crate::coaching::CoachContext, Vec<String>) {
     (context, auto_analyze_sports)
 }
 
+/// Compare the last generated plan (generated_workouts.json) against actual activities
+/// to produce a human-readable adherence summary for the AI brief.
+fn build_adherence_summary(
+    detailed_activities: &[crate::models::GarminActivity],
+    _week_start_day: &str,
+) -> Vec<String> {
+    let workouts_path = std::env::var("GENERATED_WORKOUTS_PATH")
+        .unwrap_or_else(|_| "generated_workouts.json".to_string());
+    let json_str = match std::fs::read_to_string(&workouts_path) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let planned: Vec<serde_json::Value> = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    if planned.is_empty() {
+        return Vec::new();
+    }
+
+    // Only report adherence for planned workouts whose scheduled date has already passed
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    let mut summary = Vec::new();
+    let mut completed_count = 0;
+    let mut total_past = 0;
+
+    for planned_workout in &planned {
+        let scheduled_date = planned_workout
+            .get("scheduledDate")
+            .and_then(|d| d.as_str())
+            .unwrap_or("");
+
+        // Only assess adherence for past dates
+        if scheduled_date >= today.as_str() || scheduled_date.is_empty() {
+            continue;
+        }
+        total_past += 1;
+
+        let workout_name = planned_workout
+            .get("workoutName")
+            .and_then(|n| n.as_str())
+            .unwrap_or("Unknown Workout");
+
+        // Extract planned exercises and weights from the steps
+        let mut planned_exercises: Vec<(String, f64, String)> = Vec::new(); // (exercise, weight, reps_str)
+        if let Some(steps) = planned_workout.get("steps").and_then(|s| s.as_array()) {
+            for step in steps {
+                if step.get("phase").and_then(|p| p.as_str()) != Some("interval") {
+                    continue;
+                }
+                let exercise = step
+                    .get("exercise")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let weight = step.get("weight").and_then(|w| w.as_f64()).unwrap_or(0.0);
+                let reps = if let Some(r) = step.get("reps") {
+                    if let Some(n) = r.as_i64() {
+                        format!("{}", n)
+                    } else {
+                        r.as_str().unwrap_or("?").to_string()
+                    }
+                } else {
+                    "?".to_string()
+                };
+                if !exercise.is_empty() {
+                    planned_exercises.push((exercise, weight, reps));
+                }
+            }
+        }
+
+        // Check if there's an actual strength activity on that date
+        let actual_on_date: Vec<&crate::models::GarminActivity> = detailed_activities
+            .iter()
+            .filter(|a| a.start_time.starts_with(scheduled_date))
+            .filter(|a| {
+                a.get_activity_type()
+                    .map(|t| {
+                        let lower = t.to_lowercase();
+                        lower.contains("strength") || lower.contains("fitness")
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        if actual_on_date.is_empty() {
+            summary.push(format!(
+                "- **{}** ({}): SKIPPED - No strength activity recorded",
+                workout_name, scheduled_date
+            ));
+        } else {
+            completed_count += 1;
+            // Extract actual exercises done
+            let mut actual_exercises: Vec<String> = Vec::new();
+            for act in &actual_on_date {
+                if let Some(crate::models::GarminSetsData::Details(data)) = &act.sets {
+                    for set in &data.exercise_sets {
+                        if set.set_type == "ACTIVE" {
+                            if let Some(ex) = set.exercises.first() {
+                                let weight_kg = set.weight.unwrap_or(0.0) / 1000.0;
+                                let reps = set.repetition_count.unwrap_or(0);
+                                actual_exercises
+                                    .push(format!("{} {:.1}kg x{}", ex.category, weight_kg, reps));
+                            }
+                        }
+                    }
+                }
+            }
+            let actual_str = if actual_exercises.is_empty() {
+                "completed (no set details)".to_string()
+            } else {
+                // Deduplicate and summarize
+                let mut unique: Vec<String> = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for ex in &actual_exercises {
+                    if seen.insert(ex.clone()) {
+                        unique.push(ex.clone());
+                    }
+                }
+                if unique.len() > 8 {
+                    unique.truncate(8);
+                    unique.push("...".to_string());
+                }
+                format!("COMPLETED - Sets: {}", unique.join(", "))
+            };
+            summary.push(format!(
+                "- **{}** ({}): {}",
+                workout_name, scheduled_date, actual_str
+            ));
+        }
+    }
+
+    if total_past > 0 {
+        summary.insert(
+            0,
+            format!(
+                "**Adherence Rate**: {}/{} planned workouts completed ({:.0}%)",
+                completed_count,
+                total_past,
+                (completed_count as f64 / total_past as f64) * 100.0
+            ),
+        );
+    }
+
+    summary
+}
+
 async fn auto_analyze_recent_activities(
     detailed_activities: &[crate::models::GarminActivity],
     auto_analyze_sports: &[String],
     database: &Arc<Mutex<Database>>,
     config: &crate::config::AppConfig,
 ) {
-    let gemini_model = std::env::var("GEMINI_MODEL")
-        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
     let ai_client = crate::ai_client::AiClient::new(config.gemini_api_key.clone(), gemini_model);
     let db = database.lock().await;
 
@@ -589,8 +788,8 @@ async fn generate_and_publish_plan(
     info!("\nGEMINI_API_KEY found! Generating workout via Gemini...");
 
     // Initialize AI Client
-    let gemini_model = std::env::var("GEMINI_MODEL")
-        .unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
     let ai_client = crate::ai_client::AiClient::new(config.gemini_api_key.clone(), gemini_model);
 
     info!("Cleaning up previously generated workouts before generating a new plan...");
@@ -603,10 +802,8 @@ async fn generate_and_publish_plan(
         info!("Warning: failed to clear AI chat log: {}", e);
     }
 
-    info!("Wiping previous coach briefs...");
-    if let Err(e) = database.lock().await.clear_coach_briefs() {
-        info!("Warning: failed to clear coach briefs: {}", e);
-    }
+    // Note: we no longer clear coach_briefs here — the previous plan response
+    // is fed back into the next brief for coaching continuity.
 
     match ai_client.generate_workout(brief).await {
         Ok(markdown_response) => {

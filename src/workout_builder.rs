@@ -276,19 +276,19 @@ impl WorkoutBuilder {
                 } else {
                     STEP_TYPE_INTERVAL
                 };
-                
+
                 let mut sub_exercises = Vec::new();
                 if let Some(arr) = step.get("exercises").and_then(|e| e.as_array()) {
                     sub_exercises = arr.clone();
                 } else {
                     sub_exercises.push(step.clone());
                 }
-                
+
                 let sets = step.get("sets").and_then(|s| s.as_i64()).unwrap_or(1);
                 let use_repeat_group = sets > 1 || sub_exercises.len() > 1;
 
                 let mut group_steps = Vec::new();
-                
+
                 // If it's a repeat group, we increment order for the repeat group itself first.
                 let repeat_order = order;
                 if use_repeat_group {
@@ -306,14 +306,19 @@ impl WorkoutBuilder {
                     let is_unrecognized = cat_key.is_none();
 
                     let reps = sub_ex.get("reps").or_else(|| step.get("reps"));
-                    let duration = sub_ex.get("time").or_else(|| step.get("time")).or_else(|| sub_ex.get("duration")).or_else(|| step.get("duration"));
+                    let duration = sub_ex
+                        .get("time")
+                        .or_else(|| step.get("time"))
+                        .or_else(|| sub_ex.get("duration"))
+                        .or_else(|| step.get("duration"));
 
                     let mut end_cond_id = CONDITION_ID_LAP_BUTTON;
                     let mut end_cond_key = CONDITION_LAP_BUTTON;
                     let mut end_val: Option<Value> = None;
 
                     if let Some(reps_value) = reps {
-                        if step_type_id != STEP_TYPE_ID_WARMUP && step_type_id != STEP_TYPE_ID_COOLDOWN
+                        if step_type_id != STEP_TYPE_ID_WARMUP
+                            && step_type_id != STEP_TYPE_ID_COOLDOWN
                         {
                             if let Some(r_str) = reps_value.as_str() {
                                 if r_str.to_uppercase().contains("AMRAP") {
@@ -341,12 +346,19 @@ impl WorkoutBuilder {
                         }
                     }
 
-                    let weight_val = sub_ex.get("weight").or_else(|| step.get("weight")).and_then(Self::parse_weight);
+                    let weight_val = sub_ex
+                        .get("weight")
+                        .or_else(|| step.get("weight"))
+                        .and_then(Self::parse_weight);
 
                     let mut category_obj = cat_key.clone().map(|c| json!(c));
                     let mut exercise_name_obj = ex_key.clone().map(|e| json!(e));
 
-                    let note = sub_ex.get("note").or_else(|| step.get("note")).and_then(|n| n.as_str()).unwrap_or("");
+                    let note = sub_ex
+                        .get("note")
+                        .or_else(|| step.get("note"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("");
 
                     let mut description = if note.is_empty() {
                         None
@@ -363,7 +375,7 @@ impl WorkoutBuilder {
                         }
                         description = Some(desc.trim().to_string());
                     }
-                    
+
                     let mut step_dict = json!({
                         "type": "ExecutableStepDTO",
                         "stepOrder": order,
@@ -401,7 +413,7 @@ impl WorkoutBuilder {
                             }
                         }
                     }
-                    
+
                     if use_repeat_group {
                         group_steps.push(step_dict);
                     } else {
@@ -409,7 +421,7 @@ impl WorkoutBuilder {
                     }
                     order += 1;
                 }
-                
+
                 // Add rest if specified (only at the end of the block/superset)
                 if step_type_id == STEP_TYPE_ID_INTERVAL {
                     if let Some(rest) = step.get("rest") {
@@ -432,7 +444,7 @@ impl WorkoutBuilder {
                                     "workoutTargetTypeKey": TARGET_NO_TARGET,
                                 }
                             });
-                            
+
                             if use_repeat_group {
                                 group_steps.push(rest_step);
                             } else {
@@ -442,7 +454,7 @@ impl WorkoutBuilder {
                         }
                     }
                 }
-                
+
                 if use_repeat_group {
                     let repeat_step = json!({
                         "type": "RepeatGroupDTO",
@@ -486,7 +498,6 @@ impl WorkoutBuilder {
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {

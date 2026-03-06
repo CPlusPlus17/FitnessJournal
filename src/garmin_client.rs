@@ -368,7 +368,11 @@ impl GarminClient {
     async fn get_ai_workout_schedule_dates(&self) -> std::collections::HashMap<String, String> {
         let mut dates = std::collections::HashMap::new();
         let today = chrono::Local::now();
-        let mut tz_year = today.format("%Y").to_string().parse::<i32>().unwrap_or(2025);
+        let mut tz_year = today
+            .format("%Y")
+            .to_string()
+            .parse::<i32>()
+            .unwrap_or(2025);
         let mut tz_month = today.format("%m").to_string().parse::<i32>().unwrap_or(1) - 1;
 
         for _ in 0..2 {

@@ -18,6 +18,14 @@ pub struct BriefInput<'a> {
     pub context: &'a CoachContext,
     pub progression_history: &'a [String],
     pub week_start_day: &'a str,
+    /// The AI's response from the previous plan generation (for coaching continuity).
+    pub previous_plan_response: &'a Option<String>,
+    /// Recent AI activity analyses (date, summary) from the last 7 days.
+    pub recent_analyses: &'a [(String, String)],
+    /// Adherence summary comparing planned vs. actual workouts.
+    pub adherence_summary: &'a [String],
+    /// Week-over-week progression deltas: (exercise, this_wk_weight, this_wk_reps, last_wk_weight, last_wk_reps).
+    pub weekly_deltas: &'a [(String, f64, i32, f64, i32)],
 }
 
 pub struct Coach;
@@ -188,6 +196,10 @@ impl Coach {
             context,
             progression_history,
             week_start_day,
+            previous_plan_response,
+            recent_analyses,
+            adherence_summary,
+            weekly_deltas,
         } = input;
         let now = Utc::now();
         let mut brief = String::new();
@@ -213,12 +225,16 @@ impl Coach {
         let today_weekday = now.date_naive().weekday();
         let days_since_week_start = (today_weekday.num_days_from_monday() as i64
             - week_start_chrono.num_days_from_monday() as i64
-            + 7) % 7;
+            + 7)
+            % 7;
         let week_start_date = now.date_naive() - Duration::days(days_since_week_start);
         let week_end_date = week_start_date + Duration::days(6);
         let week_start_str = week_start_date.format("%Y-%m-%d").to_string();
         let week_end_str = week_end_date.format("%Y-%m-%d").to_string();
-        brief.push_str(&format!("**Training Week**: {} to {} (starts on {})\n\n", week_start_str, week_end_str, week_start_day));
+        brief.push_str(&format!(
+            "**Training Week**: {} to {} (starts on {})\n\n",
+            week_start_str, week_end_str, week_start_day
+        ));
 
         // Let's summarize what was already done today from the history
         brief.push_str("**Activities Completed Today**:\n");
@@ -579,7 +595,8 @@ impl Coach {
             let strength_this_week: Vec<&crate::models::GarminActivity> = detailed_activities
                 .iter()
                 .filter(|a| {
-                    let is_strength = a.get_activity_type()
+                    let is_strength = a
+                        .get_activity_type()
                         .map(|t| t.contains("strength") || t.contains("fitness"))
                         .unwrap_or(false);
                     let in_week = a.start_time.as_str() >= week_start_str.as_str()
@@ -609,16 +626,121 @@ impl Coach {
                             focus_str = format!(" | Focus: {}", sorted.join(", "));
                         }
                     }
-                    brief.push_str(&format!("- **{}** {} ({:.0} min{})\n", date, name, dur, focus_str));
+                    brief.push_str(&format!(
+                        "- **{}** {} ({:.0} min{})\n",
+                        date, name, dur, focus_str
+                    ));
                 }
             }
             brief.push_str(&format!(
                 "\n*You have completed {} strength session(s) so far this week ({} to {}).*\n\n",
-                strength_this_week.len(), week_start_str, week_end_str
+                strength_this_week.len(),
+                week_start_str,
+                week_end_str
             ));
         }
 
-        // 7. Required Output
+        // 7. Previous Plan (coaching continuity)
+        if let Some(prev) = previous_plan_response {
+            brief.push_str("## Previous Week's AI Coach Plan\n");
+            brief.push_str("*This is the plan you (the AI Coach) generated last time. Use it to maintain continuity, adjust loads, and avoid repeating mistakes.*\n");
+            // Truncate to avoid blowing up the context — keep the most relevant parts
+            let truncated: String = prev.chars().take(4000).collect();
+            brief.push_str(&truncated);
+            if prev.len() > 4000 {
+                brief.push_str("\n[...truncated...]\n");
+            }
+            brief.push_str("\n\n");
+        }
+
+        // 8. Plan Adherence (planned vs. actual)
+        if !adherence_summary.is_empty() {
+            brief.push_str("## Plan Adherence (Last Plan vs. What Was Actually Done)\n");
+            brief.push_str("*Review how well the athlete followed the previous plan. Adjust upcoming difficulty and volume accordingly.*\n");
+            for line in adherence_summary {
+                brief.push_str(&format!("{}\n", line));
+            }
+            brief.push('\n');
+        }
+
+        // 9. Week-over-Week Progression Deltas
+        if !weekly_deltas.is_empty() {
+            brief.push_str("## Week-over-Week Progression\n");
+            brief.push_str("*Compare this week's best working weights vs. last week's. Use this to drive progressive overload decisions.*\n");
+            for (name, tw, tr, lw, lr) in weekly_deltas {
+                if *lw > 0.0 && *tw > 0.0 {
+                    let weight_delta = tw - lw;
+                    let arrow = if weight_delta > 0.0 {
+                        "+"
+                    } else if weight_delta < 0.0 {
+                        ""
+                    } else {
+                        "="
+                    };
+                    if arrow == "=" {
+                        brief.push_str(&format!(
+                            "- **{}**: {:.1}kg x{} -> {:.1}kg x{} (weight unchanged, reps {} {})\n",
+                            name,
+                            lw,
+                            lr,
+                            tw,
+                            tr,
+                            if *tr > *lr {
+                                "up"
+                            } else if *tr < *lr {
+                                "down"
+                            } else {
+                                "same"
+                            },
+                            if *tr != *lr {
+                                format!("{:+}", tr - lr)
+                            } else {
+                                String::new()
+                            }
+                        ));
+                    } else {
+                        brief.push_str(&format!(
+                            "- **{}**: {:.1}kg x{} -> {:.1}kg x{} ({}{:.1}kg)\n",
+                            name,
+                            lw,
+                            lr,
+                            tw,
+                            tr,
+                            arrow,
+                            weight_delta.abs()
+                        ));
+                    }
+                } else if *lw > 0.0 {
+                    brief.push_str(&format!(
+                        "- **{}**: {:.1}kg x{} -> not trained this week\n",
+                        name, lw, lr
+                    ));
+                } else {
+                    brief.push_str(&format!(
+                        "- **{}**: new this week -> {:.1}kg x{}\n",
+                        name, tw, tr
+                    ));
+                }
+            }
+            brief.push('\n');
+        }
+
+        // 10. Recent AI Activity Analyses
+        if !recent_analyses.is_empty() {
+            brief.push_str("## Recent AI Activity Analyses (Last 7 Days)\n");
+            brief.push_str("*These are your own previous analyses of the athlete's completed workouts. Use these insights to inform the next plan.*\n");
+            for (date, summary) in recent_analyses {
+                // Truncate each analysis to keep brief manageable
+                let truncated: String = summary.chars().take(500).collect();
+                brief.push_str(&format!("### {}\n{}", date, truncated));
+                if summary.len() > 500 {
+                    brief.push_str("...");
+                }
+                brief.push_str("\n\n");
+            }
+        }
+
+        // 11. Required Output
         brief.push_str("## Required Output\n");
         brief.push_str(&format!(
             "Based on the Athlete Profile, Goals, and Activity Log, please generate the training plan for the **remaining days of this week** ({} to {}).\n",

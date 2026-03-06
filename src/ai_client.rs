@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
-use tracing::info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::info;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,8 +124,7 @@ impl AiClient {
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model,
-            self.api_key
+            self.model, self.api_key
         );
 
         let response = self
@@ -213,8 +212,7 @@ impl AiClient {
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model,
-            self.api_key
+            self.model, self.api_key
         );
 
         let response = self
