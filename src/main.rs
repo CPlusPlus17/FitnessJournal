@@ -354,46 +354,31 @@ pub async fn run_coach_pipeline(
         .await;
     }
 
-    // 5. Fetch coaching memory data from DB
-    let previous_plan_response = database
-        .lock()
-        .await
-        .get_last_coach_plan_response()
-        .unwrap_or(None);
+    // 5. Fetch coaching memory data from DB (single lock acquisition)
+    let (previous_plan_response, recent_analyses, weekly_deltas) = {
+        let db = database.lock().await;
+        let prev = db.get_last_coach_plan_response().unwrap_or(None);
+        let analyses = db.get_recent_activity_analyses(7).unwrap_or_default();
 
-    let recent_analyses = database
-        .lock()
-        .await
-        .get_recent_activity_analyses(7)
-        .unwrap_or_default();
+        // Compute week boundaries for progression deltas
+        let now_local = chrono::Local::now();
+        let week_start_chrono = crate::config::parse_weekday(&config.week_start_day);
+        let today_weekday = now_local.date_naive().weekday();
+        let days_since_week_start = (today_weekday.num_days_from_monday() as i64
+            - week_start_chrono.num_days_from_monday() as i64
+            + 7)
+            % 7;
+        let this_week_start =
+            now_local.date_naive() - chrono::Duration::days(days_since_week_start);
+        let last_week_start = this_week_start - chrono::Duration::days(7);
+        let this_week_start_str = this_week_start.format("%Y-%m-%d").to_string();
+        let last_week_start_str = last_week_start.format("%Y-%m-%d").to_string();
 
-    // Compute week boundaries for progression deltas
-    let now_local = chrono::Local::now();
-    let week_start_chrono = match config.week_start_day.as_str() {
-        "Mon" => chrono::Weekday::Mon,
-        "Tue" => chrono::Weekday::Tue,
-        "Wed" => chrono::Weekday::Wed,
-        "Thu" => chrono::Weekday::Thu,
-        "Fri" => chrono::Weekday::Fri,
-        "Sat" => chrono::Weekday::Sat,
-        "Sun" => chrono::Weekday::Sun,
-        _ => chrono::Weekday::Mon,
+        let deltas = db
+            .get_weekly_progression_deltas(&this_week_start_str, &last_week_start_str)
+            .unwrap_or_default();
+        (prev, analyses, deltas)
     };
-    let today_weekday = now_local.date_naive().weekday();
-    let days_since_week_start = (today_weekday.num_days_from_monday() as i64
-        - week_start_chrono.num_days_from_monday() as i64
-        + 7)
-        % 7;
-    let this_week_start = now_local.date_naive() - chrono::Duration::days(days_since_week_start);
-    let last_week_start = this_week_start - chrono::Duration::days(7);
-    let this_week_start_str = this_week_start.format("%Y-%m-%d").to_string();
-    let last_week_start_str = last_week_start.format("%Y-%m-%d").to_string();
-
-    let weekly_deltas = database
-        .lock()
-        .await
-        .get_weekly_progression_deltas(&this_week_start_str, &last_week_start_str)
-        .unwrap_or_default();
 
     // Build adherence summary: compare generated_workouts.json against exercise_history
     let adherence_summary = build_adherence_summary(&detailed_activities, &config.week_start_day);
@@ -612,34 +597,6 @@ fn build_adherence_summary(
             .get("workoutName")
             .and_then(|n| n.as_str())
             .unwrap_or("Unknown Workout");
-
-        // Extract planned exercises and weights from the steps
-        let mut planned_exercises: Vec<(String, f64, String)> = Vec::new(); // (exercise, weight, reps_str)
-        if let Some(steps) = planned_workout.get("steps").and_then(|s| s.as_array()) {
-            for step in steps {
-                if step.get("phase").and_then(|p| p.as_str()) != Some("interval") {
-                    continue;
-                }
-                let exercise = step
-                    .get("exercise")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let weight = step.get("weight").and_then(|w| w.as_f64()).unwrap_or(0.0);
-                let reps = if let Some(r) = step.get("reps") {
-                    if let Some(n) = r.as_i64() {
-                        format!("{}", n)
-                    } else {
-                        r.as_str().unwrap_or("?").to_string()
-                    }
-                } else {
-                    "?".to_string()
-                };
-                if !exercise.is_empty() {
-                    planned_exercises.push((exercise, weight, reps));
-                }
-            }
-        }
 
         // Check if there's an actual strength activity on that date
         let actual_on_date: Vec<&crate::models::GarminActivity> = detailed_activities

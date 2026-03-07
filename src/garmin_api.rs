@@ -2,7 +2,7 @@ use crate::models::*;
 use anyhow::{anyhow, Context, Result};
 use reqwest::{Client, Method, RequestBuilder};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OAuth1Token {
@@ -355,12 +355,19 @@ impl GarminApi {
         let endpoint = format!("/activity-service/activity/{}/exerciseSets", activity_id);
 
         match self.connectapi_get(&endpoint).await {
-            Ok(val) => {
-                let sets: GarminSetsData = serde_json::from_value(val)?;
-                Ok(Some(sets))
-            }
+            Ok(val) => match serde_json::from_value::<GarminSetsData>(val.clone()) {
+                Ok(sets) => Ok(Some(sets)),
+                Err(e) => {
+                    error!(
+                        "Failed to deserialize exercise sets for activity {}: {}. Raw JSON: {}",
+                        activity_id,
+                        e,
+                        serde_json::to_string(&val).unwrap_or_default()
+                    );
+                    Ok(None)
+                }
+            },
             Err(e) => {
-                // For non-strength activities, this might 404
                 info!("Failed to get sets for activity {}: {}", activity_id, e);
                 Ok(None)
             }

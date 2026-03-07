@@ -142,6 +142,15 @@ pub struct ProgressionResponse {
 }
 
 #[derive(Serialize)]
+pub struct WeeklyDeltaResponse {
+    pub exercise_name: String,
+    pub this_week_weight: f64,
+    pub this_week_reps: i32,
+    pub last_week_weight: f64,
+    pub last_week_reps: i32,
+}
+
+#[derive(Serialize)]
 pub struct TodayWorkoutsResponse {
     pub done: Vec<crate::models::GarminActivity>,
     pub planned: Vec<crate::models::ScheduledWorkout>,
@@ -382,6 +391,7 @@ pub async fn run_server(
 
     let app = Router::new()
         .route("/api/progression", get(get_progression))
+        .route("/api/progression/deltas", get(get_weekly_deltas))
         .route("/api/recovery", get(get_recovery))
         .route("/api/recovery/history", get(get_recovery_history))
         .route("/api/workouts/today", get(get_today_workouts))
@@ -910,6 +920,41 @@ async fn force_pull_data(
             })),
         )),
     }
+}
+
+async fn get_weekly_deltas(State(state): State<ApiState>) -> Json<Vec<WeeklyDeltaResponse>> {
+    use chrono::Datelike;
+
+    let week_start_chrono = crate::config::parse_weekday(&state.config.week_start_day);
+    let today = chrono::Local::now().date_naive();
+
+    let days_since_start = (today.weekday().num_days_from_monday() as i64
+        - week_start_chrono.num_days_from_monday() as i64
+        + 7)
+        % 7;
+    let this_week_start = today - chrono::Duration::days(days_since_start);
+    let last_week_start = this_week_start - chrono::Duration::days(7);
+
+    let this_week_start_str = this_week_start.format("%Y-%m-%d").to_string();
+    let last_week_start_str = last_week_start.format("%Y-%m-%d").to_string();
+
+    let db = state.database.lock().await;
+    let deltas = db
+        .get_weekly_progression_deltas(&this_week_start_str, &last_week_start_str)
+        .unwrap_or_default();
+
+    let response: Vec<WeeklyDeltaResponse> = deltas
+        .into_iter()
+        .map(|(name, tw, tr, lw, lr)| WeeklyDeltaResponse {
+            exercise_name: name,
+            this_week_weight: tw,
+            this_week_reps: tr,
+            last_week_weight: lw,
+            last_week_reps: lr,
+        })
+        .collect();
+
+    Json(response)
 }
 
 async fn analyze_upcoming_event(

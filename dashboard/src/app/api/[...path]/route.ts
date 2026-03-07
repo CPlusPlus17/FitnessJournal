@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const ALLOWED_PATHS = new Set([
   'progression',
+  'progression/deltas',
   'recovery',
+  'recovery/history',
   'workouts/today',
   'workouts/upcoming',
   'muscle_heatmap',

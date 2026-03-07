@@ -294,8 +294,19 @@ impl GarminClient {
 
             if is_strength {
                 if let Some(id) = act.id {
-                    if let Ok(Some(sets)) = self.api.get_activity_exercise_sets(id).await {
-                        act.sets = Some(sets);
+                    match self.api.get_activity_exercise_sets(id).await {
+                        Ok(Some(sets)) => {
+                            act.sets = Some(sets);
+                        }
+                        Ok(None) => {
+                            info!("No exercise sets returned for strength activity {}", id);
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch/parse exercise sets for activity {}: {}",
+                                id, e
+                            );
+                        }
                     }
                 }
             }

@@ -1044,8 +1044,9 @@ pub fn start_monthly_debrief_notifier(
                                 for set in &sets.exercise_sets {
                                     if let Some(w) = set.weight {
                                         for ex in &set.exercises {
+                                            let ex_name = ex.name.clone().unwrap_or_default();
                                             let current_max =
-                                                max_weights.entry(ex.name.clone()).or_insert(0.0);
+                                                max_weights.entry(ex_name).or_insert(0.0);
                                             if w > *current_max {
                                                 *current_max = w;
                                             }

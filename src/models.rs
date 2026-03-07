@@ -165,6 +165,10 @@ pub enum GarminSetsData {
 pub struct GarminSetContainer {
     #[serde(rename = "exerciseSets")]
     pub exercise_sets: Vec<GarminSet>,
+
+    // Garmin includes extra fields like activityId — ignore them
+    #[serde(flatten)]
+    _extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -177,12 +181,21 @@ pub struct GarminSet {
     pub duration: Option<f64>,
     #[serde(default)]
     pub exercises: Vec<GarminExercise>,
+
+    // Garmin adds startTime, messageIndex, wktStepIndex, etc.
+    #[serde(flatten)]
+    _extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GarminExercise {
     pub category: String,
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
+
+    // Garmin adds probability field
+    #[serde(flatten)]
+    _extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

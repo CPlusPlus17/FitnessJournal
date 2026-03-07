@@ -1,12 +1,20 @@
 import React from 'react';
+import nextDynamic from 'next/dynamic';
 import Link from 'next/link';
 import GenerateButton from './GenerateButton';
-import MuscleMap from './MuscleMap';
 import Chat from './Chat';
 import AnalyzeButton from './AnalyzeButton';
 import AnalyzeUpcomingButton from './AnalyzeUpcomingButton';
 import ForcePullButton from './ForcePullButton';
-import RecoveryHistoryChart, { RecoveryHistoryEntry } from './RecoveryHistoryChart';
+import type { RecoveryHistoryEntry } from './RecoveryHistoryChart';
+
+const RecoveryHistoryChart = nextDynamic(() => import('./RecoveryHistoryChart'), {
+  loading: () => <div className="h-64 animate-pulse bg-white/5 rounded-lg" />,
+});
+
+const MuscleMap = nextDynamic(() => import('./MuscleMap'), {
+  loading: () => <div className="h-96 animate-pulse bg-white/5 rounded-lg" />,
+});
 
 export const dynamic = 'force-dynamic';
 
@@ -94,7 +102,7 @@ async function backendFetch(path: string, init: RequestInit = {}): Promise<Respo
   return fetch(`${FITNESS_API_BASE_URL}${path}`, {
     ...init,
     headers,
-    cache: 'force-cache',
+    cache: 'no-store',
   });
 }
 
@@ -170,6 +178,24 @@ function Sparkline({ history }: { history: { weight: number, reps?: number, date
       <circle cx={width} cy={height - ((history[history.length - 1].weight - minY_W) / (maxY_W - minY_W)) * height} r="2.5" fill={strokeColorW} className="opacity-75 group-hover:opacity-100 transition-opacity" />
     </svg>
   );
+}
+
+type WeeklyDelta = {
+  exercise_name: string;
+  this_week_weight: number;
+  this_week_reps: number;
+  last_week_weight: number;
+  last_week_reps: number;
+};
+
+async function fetchWeeklyDeltas(): Promise<WeeklyDelta[]> {
+  try {
+    const res = await backendFetch('/api/progression/deltas');
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
 }
 
 async function fetchProgression(): Promise<ProgressionItem[]> {
@@ -253,11 +279,14 @@ async function fetchUpcomingWorkouts(): Promise<PlannedWorkout[]> {
 }
 
 export default async function Dashboard() {
-  const data = await fetchProgression();
-  const recovery = await fetchRecovery();
-  const recoveryHistory = await fetchRecoveryHistory();
-  const todayWorkouts = await fetchTodayWorkouts();
-  const upcomingWorkouts = await fetchUpcomingWorkouts();
+  const [data, recovery, recoveryHistory, todayWorkouts, upcomingWorkouts, weeklyDeltas] = await Promise.all([
+    fetchProgression(),
+    fetchRecovery(),
+    fetchRecoveryHistory(),
+    fetchTodayWorkouts(),
+    fetchUpcomingWorkouts(),
+    fetchWeeklyDeltas(),
+  ]);
 
   // Helper to check if a planned workout is already completed today
   const isWorkoutDone = (planned: PlannedWorkout) => {
@@ -562,6 +591,51 @@ export default async function Dashboard() {
             ))}
           </div>
         </section>
+
+        {/* Weekly Strength Deltas */}
+        {weeklyDeltas.length > 0 && (
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold tracking-tight text-cyan-400">Week-over-Week Progression</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {weeklyDeltas.map((delta, idx) => {
+                const weightDiff = delta.this_week_weight - delta.last_week_weight;
+                const repsDiff = delta.this_week_reps - delta.last_week_reps;
+                const isUp = weightDiff > 0 || (weightDiff === 0 && repsDiff > 0);
+                const isDown = weightDiff < 0 || (weightDiff === 0 && repsDiff < 0);
+
+                return (
+                  <div key={idx} className="glass-panel p-5 group relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                    <h4 className="text-gray-400 text-sm font-medium tracking-wider truncate" title={delta.exercise_name}>
+                      {delta.exercise_name}
+                    </h4>
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-extrabold tracking-tight text-white">{delta.this_week_weight.toFixed(1)}</span>
+                        <span className="text-gray-500 text-sm">kg x {delta.this_week_reps}</span>
+                      </div>
+                      <span className={`text-lg font-bold ${isUp ? 'text-emerald-400' : isDown ? 'text-red-400' : 'text-gray-500'}`}>
+                        {isUp ? '↑' : isDown ? '↓' : '='}
+                      </span>
+                    </div>
+                    {delta.last_week_weight > 0 && (
+                      <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500">
+                        Last week: {delta.last_week_weight.toFixed(1)}kg x {delta.last_week_reps}
+                        {weightDiff !== 0 && (
+                          <span className={`ml-2 ${weightDiff > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            ({weightDiff > 0 ? '+' : ''}{weightDiff.toFixed(1)}kg)
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <section className="space-y-6">
           <div className="flex items-center justify-between">

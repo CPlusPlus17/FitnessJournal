@@ -1,8 +1,21 @@
+use chrono::Weekday;
 use figment::{
     providers::{Env, Format, Json, Toml},
     Figment,
 };
 use serde::{Deserialize, Serialize};
+
+pub fn parse_weekday(day: &str) -> Weekday {
+    match day {
+        "Tue" => Weekday::Tue,
+        "Wed" => Weekday::Wed,
+        "Thu" => Weekday::Thu,
+        "Fri" => Weekday::Fri,
+        "Sat" => Weekday::Sat,
+        "Sun" => Weekday::Sun,
+        _ => Weekday::Mon,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {

@@ -212,16 +212,7 @@ impl Coach {
         brief.push_str(&format!("**Current Date**: {}\n\n", today_date_str));
 
         // Compute week boundaries based on configurable start day
-        let week_start_chrono = match week_start_day {
-            "Mon" => chrono::Weekday::Mon,
-            "Tue" => chrono::Weekday::Tue,
-            "Wed" => chrono::Weekday::Wed,
-            "Thu" => chrono::Weekday::Thu,
-            "Fri" => chrono::Weekday::Fri,
-            "Sat" => chrono::Weekday::Sat,
-            "Sun" => chrono::Weekday::Sun,
-            _ => chrono::Weekday::Mon,
-        };
+        let week_start_chrono = crate::config::parse_weekday(week_start_day);
         let today_weekday = now.date_naive().weekday();
         let days_since_week_start = (today_weekday.num_days_from_monday() as i64
             - week_start_chrono.num_days_from_monday() as i64
@@ -645,9 +636,10 @@ impl Coach {
             brief.push_str("## Previous Week's AI Coach Plan\n");
             brief.push_str("*This is the plan you (the AI Coach) generated last time. Use it to maintain continuity, adjust loads, and avoid repeating mistakes.*\n");
             // Truncate to avoid blowing up the context — keep the most relevant parts
+            let char_count = prev.chars().count();
             let truncated: String = prev.chars().take(4000).collect();
             brief.push_str(&truncated);
-            if prev.len() > 4000 {
+            if char_count > 4000 {
                 brief.push_str("\n[...truncated...]\n");
             }
             brief.push_str("\n\n");
@@ -668,72 +660,56 @@ impl Coach {
             brief.push_str("## Week-over-Week Progression\n");
             brief.push_str("*Compare this week's best working weights vs. last week's. Use this to drive progressive overload decisions.*\n");
             for (name, tw, tr, lw, lr) in weekly_deltas {
-                if *lw > 0.0 && *tw > 0.0 {
-                    let weight_delta = tw - lw;
-                    let arrow = if weight_delta > 0.0 {
-                        "+"
-                    } else if weight_delta < 0.0 {
-                        ""
-                    } else {
-                        "="
-                    };
-                    if arrow == "=" {
+                match (*lw > 0.0, *tw > 0.0) {
+                    (true, true) => {
+                        let weight_delta = tw - lw;
+                        if weight_delta.abs() < f64::EPSILON {
+                            // Same weight — report rep change
+                            let rep_change = match tr.cmp(lr) {
+                                std::cmp::Ordering::Greater => format!("reps up {:+}", tr - lr),
+                                std::cmp::Ordering::Less => format!("reps down {:+}", tr - lr),
+                                std::cmp::Ordering::Equal => "unchanged".to_string(),
+                            };
+                            brief.push_str(&format!(
+                                "- **{}**: {:.1}kg x{} -> {:.1}kg x{} ({})\n",
+                                name, lw, lr, tw, tr, rep_change
+                            ));
+                        } else {
+                            let sign = if weight_delta > 0.0 { "+" } else { "" };
+                            brief.push_str(&format!(
+                                "- **{}**: {:.1}kg x{} -> {:.1}kg x{} ({}{:.1}kg)\n",
+                                name, lw, lr, tw, tr, sign, weight_delta
+                            ));
+                        }
+                    }
+                    (true, false) => {
                         brief.push_str(&format!(
-                            "- **{}**: {:.1}kg x{} -> {:.1}kg x{} (weight unchanged, reps {} {})\n",
-                            name,
-                            lw,
-                            lr,
-                            tw,
-                            tr,
-                            if *tr > *lr {
-                                "up"
-                            } else if *tr < *lr {
-                                "down"
-                            } else {
-                                "same"
-                            },
-                            if *tr != *lr {
-                                format!("{:+}", tr - lr)
-                            } else {
-                                String::new()
-                            }
-                        ));
-                    } else {
-                        brief.push_str(&format!(
-                            "- **{}**: {:.1}kg x{} -> {:.1}kg x{} ({}{:.1}kg)\n",
-                            name,
-                            lw,
-                            lr,
-                            tw,
-                            tr,
-                            arrow,
-                            weight_delta.abs()
+                            "- **{}**: {:.1}kg x{} -> not trained this week\n",
+                            name, lw, lr
                         ));
                     }
-                } else if *lw > 0.0 {
-                    brief.push_str(&format!(
-                        "- **{}**: {:.1}kg x{} -> not trained this week\n",
-                        name, lw, lr
-                    ));
-                } else {
-                    brief.push_str(&format!(
-                        "- **{}**: new this week -> {:.1}kg x{}\n",
-                        name, tw, tr
-                    ));
+                    (false, true) => {
+                        brief.push_str(&format!(
+                            "- **{}**: new this week -> {:.1}kg x{}\n",
+                            name, tw, tr
+                        ));
+                    }
+                    (false, false) => {} // No data either week, skip
                 }
             }
             brief.push('\n');
         }
 
-        // 10. Recent AI Activity Analyses
+        // 10. Recent AI Activity Analyses (cap at 10 to bound prompt size)
         if !recent_analyses.is_empty() {
             brief.push_str("## Recent AI Activity Analyses (Last 7 Days)\n");
             brief.push_str("*These are your own previous analyses of the athlete's completed workouts. Use these insights to inform the next plan.*\n");
-            for (date, summary) in recent_analyses {
+            for (date, summary) in recent_analyses.iter().take(10) {
                 // Truncate each analysis to keep brief manageable
+                let char_count = summary.chars().count();
                 let truncated: String = summary.chars().take(500).collect();
                 brief.push_str(&format!("### {}\n{}", date, truncated));
-                if summary.len() > 500 {
+                if char_count > 500 {
                     brief.push_str("...");
                 }
                 brief.push_str("\n\n");
