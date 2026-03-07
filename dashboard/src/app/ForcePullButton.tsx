@@ -22,7 +22,7 @@ export default function ForcePullButton() {
         <button
             onClick={handlePull}
             disabled={loading}
-            className="px-4 py-2 bg-white/10 text-white rounded-md hover:bg-white/20 transition backdrop-blur-md border border-white/20 flex items-center gap-2 disabled:opacity-50 h-[42px]"
+            className="px-4 py-2.5 glass-panel text-white rounded-xl hover:bg-white/10 transition-all flex items-center gap-2 disabled:opacity-40 h-[42px] text-sm font-medium hover:shadow-[0_0_16px_rgba(255,255,255,0.05)]"
         >
             {loading ? (
                 <>

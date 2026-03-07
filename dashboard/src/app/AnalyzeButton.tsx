@@ -21,7 +21,6 @@ export default function AnalyzeButton({ workout }: { workout: CompletedWorkout }
     const handleAnalyze = async (e: React.MouseEvent) => {
         e.stopPropagation();
 
-        // Toggle off if already showing
         if (analysis) {
             setAnalysis(null);
             return;
@@ -48,11 +47,11 @@ export default function AnalyzeButton({ workout }: { workout: CompletedWorkout }
     };
 
     return (
-        <div className="mt-4 pt-4 border-t border-white/10 relative z-10">
+        <div className="mt-4 pt-4 border-t border-white/8 relative z-10">
             <button
                 onClick={handleAnalyze}
                 disabled={loading}
-                className="w-full text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-medium py-2 rounded transition-all border border-indigo-500/20 hover:border-indigo-500/40 disabled:opacity-50 flex justify-center items-center gap-2"
+                className="w-full text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-medium py-2.5 rounded-xl transition-all border border-indigo-500/15 hover:border-indigo-500/30 disabled:opacity-40 flex justify-center items-center gap-2 hover:shadow-[0_0_16px_rgba(99,102,241,0.1)]"
             >
                 {loading ? (
                     <>
@@ -67,13 +66,13 @@ export default function AnalyzeButton({ workout }: { workout: CompletedWorkout }
             </button>
 
             {error && (
-                <div className="mt-3 text-xs text-red-400 bg-red-400/10 p-3 rounded">
+                <div className="mt-3 text-xs text-red-400 bg-red-400/8 p-3 rounded-xl border border-red-500/15">
                     {error}
                 </div>
             )}
 
             {analysis && (
-                <div className="mt-4 text-sm text-gray-300 bg-black/20 p-4 rounded-md border border-white/5 prose prose-invert prose-sm max-w-none overflow-auto max-h-96 custom-scrollbar">
+                <div className="mt-4 text-sm text-gray-300 bg-black/20 p-4 rounded-xl border border-white/5 prose prose-invert prose-sm max-w-none overflow-auto max-h-96 custom-scrollbar backdrop-blur-sm" style={{ animation: 'fadeSlideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)' }}>
                     <ReactMarkdown>{analysis}</ReactMarkdown>
                 </div>
             )}

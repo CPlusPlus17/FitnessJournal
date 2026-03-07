@@ -9,11 +9,11 @@ import ForcePullButton from './ForcePullButton';
 import type { RecoveryHistoryEntry } from './RecoveryHistoryChart';
 
 const RecoveryHistoryChart = nextDynamic(() => import('./RecoveryHistoryChart'), {
-  loading: () => <div className="h-64 animate-pulse bg-white/5 rounded-lg" />,
+  loading: () => <div className="h-64 animate-pulse bg-white/5 rounded-2xl" />,
 });
 
 const MuscleMap = nextDynamic(() => import('./MuscleMap'), {
-  loading: () => <div className="h-96 animate-pulse bg-white/5 rounded-lg" />,
+  loading: () => <div className="h-96 animate-pulse bg-white/5 rounded-2xl" />,
 });
 
 export const dynamic = 'force-dynamic';
@@ -127,7 +127,7 @@ function Sparkline({ history }: { history: { weight: number, reps?: number, date
 
   const isPositiveTrend = history[history.length - 1].weight >= history[0].weight;
   const strokeColorW = isPositiveTrend ? "rgba(52,211,153,0.8)" : "rgba(248,113,113,0.8)";
-  const strokeColorR = "rgba(167,139,250,0.6)"; // Purple dashed line with opacity for reps
+  const strokeColorR = "rgba(167,139,250,0.6)";
 
   const hasReps = history.some(h => h.reps !== undefined);
   let pointsR = "";
@@ -149,7 +149,6 @@ function Sparkline({ history }: { history: { weight: number, reps?: number, date
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
-      {/* Reps Line */}
       {hasReps && (
         <polyline
           fill="none"
@@ -163,7 +162,6 @@ function Sparkline({ history }: { history: { weight: number, reps?: number, date
         />
       )}
 
-      {/* Weight Line */}
       <polyline
         fill="none"
         stroke={strokeColorW}
@@ -171,7 +169,7 @@ function Sparkline({ history }: { history: { weight: number, reps?: number, date
         strokeLinecap="round"
         strokeLinejoin="round"
         points={pointsW}
-        style={{ filter: `drop-shadow(0px 2px 4px ${strokeColorW})` }}
+        style={{ filter: `drop-shadow(0px 2px 6px ${strokeColorW})` }}
         className="opacity-75 group-hover:opacity-100 transition-opacity"
       />
       <circle cx="0" cy={height - ((history[0].weight - minY_W) / (maxY_W - minY_W)) * height} r="2.5" fill={strokeColorW} className="opacity-75 group-hover:opacity-100 transition-opacity" />
@@ -288,7 +286,6 @@ export default async function Dashboard() {
     fetchWeeklyDeltas(),
   ]);
 
-  // Helper to check if a planned workout is already completed today
   const isWorkoutDone = (planned: PlannedWorkout) => {
     const pTitle = extractType(planned.title || planned.name).toLowerCase();
     const pSport = extractType(planned.sport || planned.type).toLowerCase().replace(/_|\s/g, '');
@@ -297,16 +294,12 @@ export default async function Dashboard() {
       const dName = extractType(done.name).toLowerCase();
       const dType = extractType(done.type || done.activity_type || done.sport).toLowerCase().replace(/_|\s/g, '');
 
-      // Match by title/name (e.g., "Jegenstorf - Base" includes "Base")
       if (pTitle && dName && (dName.includes(pTitle) || pTitle.includes(dName))) {
         return true;
       }
-
-      // Strict match by sport/type if title doesn't match and type exists
       if (pSport && dType && (dType.includes(pSport) || pSport.includes(dType))) {
         return true;
       }
-
       return false;
     });
   };
@@ -320,7 +313,6 @@ export default async function Dashboard() {
     })
   );
 
-  // Filter upcoming workouts: if they are planned for today, check if they are done
   const todayDates = new Set(todayWorkouts.planned.map((w: PlannedWorkout) => w.date));
   const activeUpcomingWorkoutsRaw = upcomingWorkouts.filter((w: PlannedWorkout) => {
     if (todayDates.has(w.date)) {
@@ -337,74 +329,87 @@ export default async function Dashboard() {
   );
 
   return (
-    <main className="min-h-screen p-8 md:p-24 selection:bg-red-500 selection:text-white pb-32">
-      <div className="max-w-6xl mx-auto space-y-12">
-        <header className="flex flex-col md:flex-row md:items-start md:justify-between space-y-4 md:space-y-0">
-          <div className="space-y-4">
-            <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-red-400 to-orange-500">
+    <main className="min-h-screen p-6 md:p-16 lg:p-24 selection:bg-red-500 selection:text-white pb-32">
+      <div className="max-w-6xl mx-auto space-y-16">
+
+        {/* ─── Header ─── */}
+        <header className="flex flex-col md:flex-row md:items-start md:justify-between space-y-4 md:space-y-0 stagger-item" style={{ '--stagger-index': 0 } as React.CSSProperties}>
+          <div className="space-y-4 relative">
+            <div className="ambient-glow-sm bg-red-500" style={{ top: '-20px', left: '-30px' }} />
+            <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-red-400 via-orange-400 to-amber-400" style={{ textShadow: '0 0 80px rgba(248, 113, 113, 0.3)' }}>
               Fitness Journal
             </h1>
             <p className="text-gray-400 text-lg md:text-xl max-w-2xl">
               Live AI Coaching Dashboard and Garmin Connect Integration.
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <ForcePullButton />
-            <Link href="/settings" className="px-4 py-2 bg-white/10 text-white rounded-md hover:bg-white/20 transition backdrop-blur-md border border-white/20 flex items-center gap-2 h-[42px]">
+            <Link href="/settings" className="px-4 py-2.5 glass-panel text-white rounded-xl hover:bg-white/10 transition-all flex items-center gap-2 h-[42px] text-sm font-medium">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
               Configuration
             </Link>
           </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
-          <div className="glass-panel p-6 flex flex-col justify-between group">
-            <h3 className="text-gray-400 font-medium tracking-wide">BODY BATTERY</h3>
-            <div className="mt-4 flex items-end gap-2 text-white group-hover:text-red-400 transition-colors">
+        {/* ─── Recovery Metrics ─── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-5">
+          <div className="glass-panel hover-lift p-6 flex flex-col justify-between group relative overflow-hidden stagger-item" style={{ '--stagger-index': 1 } as React.CSSProperties}>
+            <div className="ambient-glow-sm bg-red-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
+            <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">Body Battery</h3>
+            <div className="mt-4 flex items-end gap-2 text-white group-hover:text-red-400 transition-colors duration-300">
               <span className="text-5xl font-bold tracking-tighter">{recovery.body_battery ?? '--'}</span>
-              <span className="text-gray-500 mb-1">/100</span>
+              <span className="text-gray-500 mb-1 text-sm">/100</span>
             </div>
-            <div className="mt-2 text-xs text-gray-500">Garmin Connect API</div>
+            <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-widest">Garmin Connect</div>
           </div>
-          <div className="glass-panel p-6 flex flex-col justify-between group">
-            <h3 className="text-gray-400 font-medium tracking-wide">SLEEP SCORE</h3>
-            <div className="mt-4 flex items-end gap-2 text-white group-hover:text-indigo-400 transition-colors">
+
+          <div className="glass-panel hover-lift p-6 flex flex-col justify-between group relative overflow-hidden stagger-item" style={{ '--stagger-index': 2 } as React.CSSProperties}>
+            <div className="ambient-glow-sm bg-indigo-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
+            <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">Sleep Score</h3>
+            <div className="mt-4 flex items-end gap-2 text-white group-hover:text-indigo-400 transition-colors duration-300">
               <span className="text-5xl font-bold tracking-tighter">{recovery.sleep_score ?? '--'}</span>
-              <span className="text-gray-500 mb-1">/100</span>
+              <span className="text-gray-500 mb-1 text-sm">/100</span>
             </div>
-            <div className="mt-2 text-xs text-gray-500">Garmin Connect API</div>
+            <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-widest">Garmin Connect</div>
           </div>
-          <div className="glass-panel p-6 flex flex-col justify-between group">
-            <h3 className="text-gray-400 font-medium tracking-wide">TRAINING READINESS</h3>
-            <div className="mt-4 flex items-end gap-2 text-white group-hover:text-emerald-400 transition-colors">
+
+          <div className="glass-panel hover-lift p-6 flex flex-col justify-between group relative overflow-hidden stagger-item" style={{ '--stagger-index': 3 } as React.CSSProperties}>
+            <div className="ambient-glow-sm bg-emerald-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
+            <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">Training Readiness</h3>
+            <div className="mt-4 flex items-end gap-2 text-white group-hover:text-emerald-400 transition-colors duration-300">
               <span className="text-5xl font-bold tracking-tighter">{recovery.training_readiness ?? '--'}</span>
-              <span className="text-gray-500 mb-1">/100</span>
+              <span className="text-gray-500 mb-1 text-sm">/100</span>
             </div>
-            <div className="mt-2 text-xs text-gray-500">Garmin Connect API</div>
+            <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-widest">Garmin Connect</div>
           </div>
-          <div className="glass-panel p-6 flex flex-col justify-between group">
-            <h3 className="text-gray-400 font-medium tracking-wide">HRV STATUS</h3>
-            <div className="mt-4 flex flex-col gap-1 text-white group-hover:text-purple-400 transition-colors">
-              <div className="text-4xl font-bold tracking-tight py-2 text-purple-400">
+
+          <div className="glass-panel hover-lift p-6 flex flex-col justify-between group relative overflow-hidden stagger-item" style={{ '--stagger-index': 4 } as React.CSSProperties}>
+            <div className="ambient-glow-sm bg-purple-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
+            <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">HRV Status</h3>
+            <div className="mt-4 flex flex-col gap-1 text-white group-hover:text-purple-400 transition-colors duration-300">
+              <div className="text-4xl font-bold tracking-tight py-1 text-purple-400">
                 {recovery.hrv_last_night_avg ?? '--'} <span className="text-base font-normal text-gray-500">ms</span>
               </div>
-              <div className="text-sm text-gray-400 flex flex-col gap-1 mt-1">
+              <div className="text-sm text-gray-400 flex flex-col gap-1.5 mt-1">
                 <div className="flex justify-between">
-                  <span>Status</span>
-                  <span className="text-white font-medium uppercase">{recovery.hrv_status ?? '--'}</span>
+                  <span className="text-gray-500">Status</span>
+                  <span className="text-white font-medium uppercase text-xs">{recovery.hrv_status ?? '--'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>7-Day Avg</span>
-                  <span className="text-white font-medium">{recovery.hrv_weekly_avg ?? '--'} ms</span>
+                  <span className="text-gray-500">7-Day Avg</span>
+                  <span className="text-white font-medium text-xs">{recovery.hrv_weekly_avg ?? '--'} ms</span>
                 </div>
               </div>
             </div>
-            <div className="mt-4 text-xs text-gray-500 pt-2 border-t border-white/5">Garmin Connect API</div>
+            <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-widest pt-2 border-t border-white/5">Garmin Connect</div>
           </div>
-          <div className="glass-panel p-6 flex flex-col justify-between group">
-            <h3 className="text-gray-400 font-medium tracking-wide">RESTING HR</h3>
-            <div className="mt-4 flex flex-col gap-1 text-white group-hover:text-rose-400 transition-colors">
-              <div className="text-4xl font-bold tracking-tight py-2 text-rose-400">
+
+          <div className="glass-panel hover-lift p-6 flex flex-col justify-between group relative overflow-hidden stagger-item" style={{ '--stagger-index': 5 } as React.CSSProperties}>
+            <div className="ambient-glow-sm bg-rose-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
+            <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">Resting HR</h3>
+            <div className="mt-4 flex flex-col gap-1 text-white group-hover:text-rose-400 transition-colors duration-300">
+              <div className="text-4xl font-bold tracking-tight py-1 text-rose-400">
                 {recovery.rhr_trend && recovery.rhr_trend.length > 0 ? recovery.rhr_trend[recovery.rhr_trend.length - 1] : '--'} <span className="text-base font-normal text-gray-500">bpm</span>
               </div>
               <div className="h-10 w-full mt-2">
@@ -413,33 +418,35 @@ export default async function Dashboard() {
                 )}
               </div>
             </div>
-            <div className="mt-4 text-xs text-gray-500 pt-2 border-t border-white/5">Garmin Connect API</div>
+            <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-widest pt-2 border-t border-white/5">Garmin Connect</div>
           </div>
-          <div className="h-full">
+
+          <div className="h-full stagger-item" style={{ '--stagger-index': 6 } as React.CSSProperties}>
             <GenerateButton />
           </div>
         </div>
 
-        {/* Recovery History Chart */}
+        {/* ─── Recovery History Chart ─── */}
         {recoveryHistory && recoveryHistory.length > 0 && (
-          <section className="space-y-6">
+          <section className="space-y-6 section-reveal">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold tracking-tight text-rose-400">Recovery Trends</h2>
+              <h2 className="text-2xl font-bold tracking-tight text-rose-400 section-header">Recovery Trends</h2>
             </div>
-            <div className="glass-panel p-6 border border-rose-500/20">
+            <div className="glass-panel-elevated p-6 border border-rose-500/15 relative overflow-hidden">
+              <div className="ambient-glow bg-rose-500 -top-20 -right-20 opacity-10" style={{ width: '200px', height: '200px' }} />
               <RecoveryHistoryChart data={recoveryHistory} />
             </div>
           </section>
         )}
 
-        {/* Today's Planned Workouts */}
-        <section className="space-y-6">
+        {/* ─── Today's Planned Workouts ─── */}
+        <section className="space-y-6 section-reveal">
           <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight text-indigo-400">Planned Today</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-indigo-400 section-header">Planned Today</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {activePlannedWorkouts.length === 0 ? (
-              <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700">
+              <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700/50">
                 <div className="text-lg">
                   {todayWorkouts.planned.length > 0 ? "All planned workouts completed for today! ✅" : "No workouts planned for today."}
                 </div>
@@ -450,11 +457,11 @@ export default async function Dashboard() {
               const displayDur = workout.duration || estDur;
 
               return (
-                <div key={idx} className="glass-panel p-5 group relative border border-indigo-500/20">
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <div key={idx} className="glass-panel hover-lift p-5 group relative border border-indigo-500/15 overflow-hidden stagger-item" style={{ '--stagger-index': idx } as React.CSSProperties}>
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                   <div className="flex justify-between items-start mb-2">
                     <h4 className="text-white font-medium">{workout.title || workout.description || "Training"}</h4>
-                    <span className="text-xs px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full">{workout.type || workout.sport || "Workout"}</span>
+                    <span className="text-xs px-2.5 py-1 bg-indigo-500/15 text-indigo-300 rounded-full border border-indigo-500/20">{workout.type || workout.sport || "Workout"}</span>
                   </div>
                   {(displayDur || workout.distance) ? (
                     <div className="mt-4 flex items-center gap-4 text-sm text-gray-400">
@@ -472,14 +479,14 @@ export default async function Dashboard() {
           </div>
         </section>
 
-        {/* Upcoming Workouts */}
-        <section className="space-y-6">
+        {/* ─── Upcoming Workouts ─── */}
+        <section className="space-y-6 section-reveal">
           <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight text-purple-400">Upcoming Schedule</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-purple-400 section-header">Upcoming Schedule</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {activeUpcomingWorkoutsWithPrediction.length === 0 ? (
-              <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700">
+              <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700/50">
                 <div className="text-lg">No upcoming workouts planned.</div>
               </div>
             ) : activeUpcomingWorkoutsWithPrediction.map((workout, idx: number) => {
@@ -489,23 +496,23 @@ export default async function Dashboard() {
               const isEstimated = !workout.duration && !!estDur;
               const displayDur = workout.duration || estDur;
 
-              let borderClass = "border-purple-500/20";
-              let bgHoverClass = "from-purple-500/10";
-              let badgeBg = "bg-purple-500/20 text-purple-300";
+              let borderClass = "border-purple-500/15";
+              let bgHoverClass = "from-purple-500/8";
+              let badgeBg = "bg-purple-500/15 text-purple-300 border border-purple-500/20";
 
               if (isPrimary) {
-                borderClass = "border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.2)]";
-                bgHoverClass = "from-amber-500/20";
-                badgeBg = "bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50";
+                borderClass = "border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.15)]";
+                bgHoverClass = "from-amber-500/15";
+                badgeBg = "bg-amber-500/15 text-amber-300 font-bold border border-amber-500/40";
               } else if (isRace) {
-                borderClass = "border-slate-300/40 shadow-[0_0_10px_rgba(203,213,225,0.1)]";
-                bgHoverClass = "from-slate-400/20";
-                badgeBg = "bg-slate-400/20 text-slate-200 font-medium border border-slate-400/30";
+                borderClass = "border-slate-300/30 shadow-[0_0_12px_rgba(203,213,225,0.08)]";
+                bgHoverClass = "from-slate-400/15";
+                badgeBg = "bg-slate-400/15 text-slate-200 font-medium border border-slate-400/25";
               }
 
               return (
-                <div key={idx} className={`glass-panel p-5 group relative border transition-all ${borderClass}`}>
-                  <div className={`absolute inset-0 bg-gradient-to-br ${bgHoverClass} to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`} />
+                <div key={idx} className={`glass-panel hover-lift p-5 group relative overflow-hidden transition-all border stagger-item ${borderClass}`} style={{ '--stagger-index': idx } as React.CSSProperties}>
+                  <div className={`absolute inset-0 bg-gradient-to-br ${bgHoverClass} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none`} />
 
                   {isPrimary && (
                     <div className="absolute -top-3 -right-3">
@@ -520,7 +527,7 @@ export default async function Dashboard() {
                     <h4 className={`font-medium ${isPrimary ? 'text-amber-400 text-lg' : (isRace ? 'text-slate-200' : 'text-white')}`}>
                       {workout.title || workout.description || "Training"}
                     </h4>
-                    <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ml-2 ${badgeBg}`}>
+                    <span className={`text-xs px-2.5 py-1 rounded-full whitespace-nowrap ml-2 ${badgeBg}`}>
                       {new Date(workout.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
                     </span>
                   </div>
@@ -549,22 +556,22 @@ export default async function Dashboard() {
           </div>
         </section>
 
-        {/* Today's Completed Workouts */}
-        <section className="space-y-6">
+        {/* ─── Today's Completed Workouts ─── */}
+        <section className="space-y-6 section-reveal">
           <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight text-emerald-400">Completed Today</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-emerald-400 section-header">Completed Today</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {todayWorkouts.done.length === 0 ? (
-              <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700">
+              <div className="col-span-full py-10 text-center text-gray-500 glass-panel border border-dashed border-gray-700/50">
                 <div className="text-lg">No workouts completed today.</div>
               </div>
             ) : todayWorkouts.done.map((workout: CompletedWorkout, idx: number) => (
-              <div key={idx} className="glass-panel p-5 group relative border border-emerald-500/20">
-                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              <div key={idx} className="glass-panel hover-lift p-5 group relative border border-emerald-500/15 overflow-hidden stagger-item" style={{ '--stagger-index': idx } as React.CSSProperties}>
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                 <div className="flex justify-between items-start mb-2">
                   <h4 className="text-white font-medium">{workout.name}</h4>
-                  <span className="text-xs px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded-full">{extractType(workout.type || workout.activity_type) || "Activity"}</span>
+                  <span className="text-xs px-2.5 py-1 bg-emerald-500/15 text-emerald-300 rounded-full border border-emerald-500/20">{extractType(workout.type || workout.activity_type) || "Activity"}</span>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
                   {!!workout.duration && (
@@ -592,11 +599,11 @@ export default async function Dashboard() {
           </div>
         </section>
 
-        {/* Weekly Strength Deltas */}
+        {/* ─── Weekly Strength Deltas ─── */}
         {weeklyDeltas.length > 0 && (
-          <section className="space-y-6">
+          <section className="space-y-6 section-reveal">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold tracking-tight text-cyan-400">Week-over-Week Progression</h2>
+              <h2 className="text-2xl font-bold tracking-tight text-cyan-400 section-header">Week-over-Week Progression</h2>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {weeklyDeltas.map((delta, idx) => {
@@ -606,23 +613,23 @@ export default async function Dashboard() {
                 const isDown = weightDiff < 0 || (weightDiff === 0 && repsDiff < 0);
 
                 return (
-                  <div key={idx} className="glass-panel p-5 group relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                  <div key={idx} className="glass-panel hover-lift p-5 group relative overflow-hidden stagger-item" style={{ '--stagger-index': idx } as React.CSSProperties}>
+                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                     <h4 className="text-gray-400 text-sm font-medium tracking-wider truncate" title={delta.exercise_name}>
                       {delta.exercise_name}
                     </h4>
                     <div className="mt-3 flex items-center justify-between">
                       <div className="flex items-baseline gap-2">
                         <span className="text-3xl font-extrabold tracking-tight text-white">{delta.this_week_weight.toFixed(1)}</span>
-                        <span className="text-gray-500 text-sm">kg x {delta.this_week_reps}</span>
+                        <span className="text-gray-500 text-sm">kg × {delta.this_week_reps}</span>
                       </div>
-                      <span className={`text-lg font-bold ${isUp ? 'text-emerald-400' : isDown ? 'text-red-400' : 'text-gray-500'}`}>
+                      <span className={`text-lg font-bold ${isUp ? 'text-emerald-400' : isDown ? 'text-red-400' : 'text-gray-500'}`} style={{ filter: isUp ? 'drop-shadow(0 0 6px rgba(52,211,153,0.4))' : isDown ? 'drop-shadow(0 0 6px rgba(248,113,113,0.4))' : 'none' }}>
                         {isUp ? '↑' : isDown ? '↓' : '='}
                       </span>
                     </div>
                     {delta.last_week_weight > 0 && (
                       <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500">
-                        Last week: {delta.last_week_weight.toFixed(1)}kg x {delta.last_week_reps}
+                        Last week: {delta.last_week_weight.toFixed(1)}kg × {delta.last_week_reps}
                         {weightDiff !== 0 && (
                           <span className={`ml-2 ${weightDiff > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                             ({weightDiff > 0 ? '+' : ''}{weightDiff.toFixed(1)}kg)
@@ -637,26 +644,27 @@ export default async function Dashboard() {
           </section>
         )}
 
-        <section className="space-y-6">
+        {/* ─── Strength Progression (Personal Bests) ─── */}
+        <section className="space-y-6 section-reveal">
           <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight">Strength Progression (Personal Bests)</h2>
+            <h2 className="text-2xl font-bold tracking-tight section-header">Strength Progression (Personal Bests)</h2>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {data.length === 0 ? (
               <div className="col-span-full py-20 text-center text-gray-400 glass-panel">
                 <div className="text-xl mb-2 font-medium">No historical progression data found.</div>
-                <div className="text-sm">Ensure the Rust AI Coach API is running on <code className="text-red-500 bg-red-500/10 px-1 py-0.5 rounded">port 3001</code>.</div>
+                <div className="text-sm">Ensure the Rust AI Coach API is running on <code className="text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded">port 3001</code>.</div>
               </div>
             ) : data.map((item, idx) => (
-              <div key={idx} className="glass-panel p-5 group cursor-default relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              <div key={idx} className="glass-panel hover-lift p-5 group cursor-default relative overflow-hidden stagger-item" style={{ '--stagger-index': idx } as React.CSSProperties}>
+                <div className="absolute inset-0 bg-gradient-to-br from-red-500/8 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                 <h4 className="text-gray-400 text-sm font-medium tracking-wider truncate" title={item.exercise_name}>
                   {item.exercise_name}
                 </h4>
                 <div className="mt-4 flex items-center justify-between">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-extrabold tracking-tight text-white group-hover:text-red-100 transition-colors">{item.max_weight.toFixed(1)}</span>
+                    <span className="text-4xl font-extrabold tracking-tight text-white group-hover:text-red-100 transition-colors duration-300">{item.max_weight.toFixed(1)}</span>
                     <span className="text-gray-500 text-sm font-medium">kg</span>
                   </div>
                   {item.history && item.history.length > 0 && (
@@ -676,11 +684,13 @@ export default async function Dashboard() {
           </div>
         </section>
 
-        <section className="space-y-6 mt-6">
+        {/* ─── AI Coach Chat ─── */}
+        <section className="space-y-6 section-reveal">
           <Chat />
         </section>
 
-        <section className="space-y-6">
+        {/* ─── Muscle Map ─── */}
+        <section className="space-y-6 section-reveal">
           <MuscleMap />
         </section>
       </div>

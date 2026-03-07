@@ -73,18 +73,23 @@ export default function Chat() {
 
 
     return (
-        <div className="glass-panel p-6 flex flex-col h-[600px] border border-white/10 group relative overflow-hidden">
-            <div className="absolute -left-12 -top-12 w-32 h-32 rounded-full blur-2xl transition-all bg-indigo-500/10 group-hover:bg-indigo-500/20"></div>
+        <div className="glass-panel-elevated p-6 flex flex-col h-[600px] border border-white/8 group relative overflow-hidden">
+            {/* Ambient glow */}
+            <div className="ambient-glow bg-indigo-500 -left-16 -top-16" style={{ width: '180px', height: '180px', animation: 'pulseGlow 4s ease-in-out infinite' }} />
+            <div className="ambient-glow bg-purple-500 -right-12 -bottom-12" style={{ width: '140px', height: '140px', animation: 'pulseGlow 5s ease-in-out infinite 1s' }} />
 
-            <h3 className="text-gray-400 font-medium tracking-wide mb-4 z-10 flex items-center justify-between">
-                <span>AI COACH CHAT</span>
-                <button onClick={fetchChat} className="text-xs bg-white/5 hover:bg-white/10 px-2 py-1 rounded border border-white/10 transition">Refresh</button>
+            <h3 className="text-gray-400 font-medium tracking-wide mb-4 z-10 flex items-center justify-between text-xs uppercase">
+                <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
+                    AI Coach Chat
+                </span>
+                <button onClick={fetchChat} className="text-xs bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/8 transition-all hover:border-white/15">Refresh</button>
             </h3>
 
             <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 z-10 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                 {messages.length === 0 && !loading && (
                     <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 space-y-2 mt-10">
-                        <svg className="w-12 h-12 text-indigo-500/50 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg className="w-12 h-12 text-indigo-500/40 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
                         <p>No messages yet.</p>
@@ -92,7 +97,10 @@ export default function Chat() {
                     </div>
                 )}
                 {messages.map((msg, idx) => (
-                    <div key={idx} className={`p-4 rounded-2xl max-w-[90%] ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 ml-auto border border-indigo-500/30' : 'bg-black/40 text-gray-300 border border-white/10'}`}>
+                    <div key={idx} className={`p-4 rounded-2xl max-w-[90%] backdrop-blur-sm transition-all ${msg.role === 'user'
+                        ? 'bg-indigo-500/15 text-indigo-100 ml-auto border border-indigo-500/25 shadow-[0_4px_20px_rgba(99,102,241,0.1)]'
+                        : 'bg-white/[0.03] text-gray-300 border border-white/8 shadow-[0_4px_20px_rgba(0,0,0,0.15)]'
+                        }`}>
                         <div className="text-xs text-gray-500 mb-2 tracking-wider flex justify-between items-center whitespace-nowrap gap-4">
                             <span className="uppercase overflow-hidden text-ellipsis">{msg.role === 'user' ? 'You' : 'Coach Gemini'}</span>
                             {msg.created_at && (
@@ -118,12 +126,9 @@ export default function Chat() {
                                     h1: (props) => <h1 className="text-lg font-bold text-white mb-2 mt-4" {...stripNode(props)} />,
                                     h2: (props) => <h2 className="text-base font-bold text-white mb-2 mt-3" {...stripNode(props)} />,
                                     h3: (props) => <h3 className="text-sm font-bold text-white mb-2 mt-2" {...stripNode(props)} />,
-                                    pre: (props) => <pre className="bg-black/60 p-3 rounded mb-2 overflow-x-auto text-xs font-mono" {...stripNode(props)} />,
+                                    pre: (props) => <pre className="bg-black/60 p-3 rounded-xl mb-2 overflow-x-auto text-xs font-mono border border-white/5" {...stripNode(props)} />,
                                     code: (props) => {
                                         const { className, ...rest } = stripNode(props);
-                                        // Next.js uses standard React types, we will just pass it down and add our own classes.
-                                        // If it's inside a pre (handled by react-markdown), we probably don't want bg/px if it's block, 
-                                        // but a simple style handles inline code.
                                         const match = /language-(\w+)/.exec(className || '')
                                         return !match ? (
                                             <code className="bg-white/10 px-1.5 py-0.5 rounded text-xs break-words" {...rest} />
@@ -139,27 +144,29 @@ export default function Chat() {
                     </div>
                 ))}
                 {loading && (
-                    <div className="p-4 rounded-2xl max-w-[90%] bg-black/40 text-gray-400 border border-white/10 animate-pulse">
-                        <span className="inline-block w-2 h-2 bg-indigo-500 rounded-full mr-1 animate-bounce"></span>
-                        <span className="inline-block w-2 h-2 bg-indigo-500 rounded-full mr-1 animate-bounce" style={{ animationDelay: '0.1s' }}></span>
-                        <span className="inline-block w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                    <div className="p-4 rounded-2xl max-w-[90%] bg-white/[0.03] text-gray-400 border border-white/8">
+                        <div className="flex items-center gap-1.5">
+                            <span className="inline-block w-2 h-2 bg-indigo-500 rounded-full animate-bounce shadow-[0_0_6px_rgba(99,102,241,0.5)]"></span>
+                            <span className="inline-block w-2 h-2 bg-indigo-500 rounded-full animate-bounce shadow-[0_0_6px_rgba(99,102,241,0.5)]" style={{ animationDelay: '0.15s' }}></span>
+                            <span className="inline-block w-2 h-2 bg-indigo-500 rounded-full animate-bounce shadow-[0_0_6px_rgba(99,102,241,0.5)]" style={{ animationDelay: '0.3s' }}></span>
+                        </div>
                     </div>
                 )}
             </div>
 
-            <form onSubmit={handleSend} className="flex gap-2 relative z-10 mt-auto">
+            <form onSubmit={handleSend} className="flex gap-3 relative z-10 mt-auto">
                 <input
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="Ask Coach about your plan..."
-                    className="flex-1 bg-black/40 border border-white/10 rounded-full px-5 py-3 text-white focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-gray-600"
+                    className="flex-1 bg-black/30 border border-white/8 rounded-2xl px-5 py-3 text-white focus:outline-none focus:border-indigo-500/40 focus:shadow-[0_0_0_3px_rgba(99,102,241,0.1)] transition-all placeholder:text-gray-600 backdrop-blur-sm"
                     disabled={loading}
                 />
                 <button
                     type="submit"
                     disabled={loading || !input.trim()}
-                    className="bg-indigo-500/20 hover:bg-indigo-500/40 text-indigo-300 font-medium py-3 px-8 rounded-full transition-all border border-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 font-medium py-3 px-8 rounded-2xl transition-all border border-indigo-500/25 hover:border-indigo-500/40 disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(99,102,241,0.15)]"
                 >
                     Send
                 </button>

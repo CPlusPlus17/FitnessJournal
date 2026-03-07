@@ -15,8 +15,6 @@ type TooltipInfo = {
     totalSets: number;
 };
 
-// Adjust color scale to be from yellow/orange to deep red based on frequency of active sets
-// frequency 1 = index 0 (yellow). frequency 10+ = index 9 (deep red)
 const FATIGUE_COLORS = [
     "#fef08a", // yellow-300
     "#fde047", // yellow-400
@@ -30,7 +28,6 @@ const FATIGUE_COLORS = [
     "#7f1d1d", // red-900
 ];
 
-/** Convert GARMIN_CATEGORY to Title Case, e.g. BENCH_PRESS → Bench Press */
 function formatExerciseName(name: string): string {
     return name
         .split('_')
@@ -38,7 +35,6 @@ function formatExerciseName(name: string): string {
         .join(' ');
 }
 
-/** Convert slug like upper-back → Upper Back */
 function formatMuscleName(slug: string): string {
     return slug
         .split('-')
@@ -72,7 +68,6 @@ export default function MuscleMap() {
         fetchData();
     }, []);
 
-    // Map old muscle names to the new package's accepted slugs
     const slugMap: Record<string, string> = {
         'front-deltoids': 'deltoids',
         'back-deltoids': 'deltoids',
@@ -80,7 +75,6 @@ export default function MuscleMap() {
         'abductors': 'adductors',
     };
 
-    // Build reverse lookup: mapped muscle slug → exercises that trained it
     const muscleToExercises = useMemo(() => {
         const map: Record<string, { name: string; frequency: number }[]> = {};
         data.forEach(item => {
@@ -98,7 +92,6 @@ export default function MuscleMap() {
         return map;
     }, [data]);
 
-    // Aggregate frequencies per muscle
     const muscleFrequencies: Record<string, number> = {};
     data.forEach(item => {
         const freq = item.frequency || 1;
@@ -116,15 +109,12 @@ export default function MuscleMap() {
         };
     });
 
-    // Use native DOM events to detect hover on SVG paths — React synthetic events
-    // don't always bubble correctly from third-party SVG components.
     useEffect(() => {
         const wrapper = wrapperRef.current;
         if (!wrapper || Object.keys(muscleToExercises).length === 0) return;
 
         const handleMouseMove = (e: MouseEvent) => {
             const target = e.target as Element;
-            // Walk up the DOM to find an element with an `id` matching a known muscle
             let current: Element | null = target;
             let slug: string | null = null;
             while (current && current instanceof Element) {
@@ -164,31 +154,34 @@ export default function MuscleMap() {
 
     if (loading) {
         return (
-            <div className="glass-panel p-6 flex items-center justify-center min-h-[300px]">
+            <div className="glass-panel-elevated p-6 flex items-center justify-center min-h-[300px]">
                 <div className="text-gray-400 animate-pulse">Loading Muscle Heatmap...</div>
             </div>
         );
     }
 
     return (
-        <div className="glass-panel p-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+        <div className="glass-panel-elevated p-6 relative overflow-hidden">
+            {/* Ambient glow behind */}
+            <div className="ambient-glow bg-red-500" style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '300px', height: '300px', opacity: 0.06 }} />
+
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 relative z-10">
                 <div>
-                    <h3 className="text-xl font-bold tracking-tight mb-2">Muscle Fatigue Heatmap</h3>
+                    <h3 className="text-xl font-bold tracking-tight mb-2 section-header">Muscle Fatigue Heatmap</h3>
                     <p className="text-gray-400 text-sm">
                         Visualizing active working sets over the last 14 days. Yellow indicates low fatigue, deep red indicates high fatigue.
                     </p>
                 </div>
-                <div className="mt-4 md:mt-0 flex bg-gray-800/50 p-1 rounded-lg border border-white/10">
+                <div className="mt-4 md:mt-0 flex bg-white/[0.03] p-1 rounded-xl border border-white/8 backdrop-blur-sm">
                     <button
                         onClick={() => setGender('male')}
-                        className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${gender === 'male' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-gray-400 hover:text-gray-300'}`}
+                        className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${gender === 'male' ? 'bg-red-500/15 text-red-400 border border-red-500/25 shadow-[0_0_10px_rgba(248,113,113,0.1)]' : 'text-gray-400 hover:text-gray-300 border border-transparent'}`}
                     >
                         Male
                     </button>
                     <button
                         onClick={() => setGender('female')}
-                        className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${gender === 'female' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-gray-400 hover:text-gray-300'}`}
+                        className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${gender === 'female' ? 'bg-red-500/15 text-red-400 border border-red-500/25 shadow-[0_0_10px_rgba(248,113,113,0.1)]' : 'text-gray-400 hover:text-gray-300 border border-transparent'}`}
                     >
                         Female
                     </button>
@@ -197,7 +190,7 @@ export default function MuscleMap() {
 
             <div
                 ref={wrapperRef}
-                className="relative flex flex-col md:flex-row items-center justify-center gap-12 w-full"
+                className="relative flex flex-col md:flex-row items-center justify-center gap-12 w-full z-10"
             >
                 <div className="flex flex-col items-center w-full max-w-[250px]">
                     <h4 className="text-sm font-medium text-gray-400 mb-4 tracking-wider uppercase">Anterior (Front)</h4>
@@ -231,11 +224,12 @@ export default function MuscleMap() {
                         }}
                     >
                         <div
-                            className="rounded-xl px-4 py-3 shadow-2xl border border-white/10 min-w-[180px]"
+                            className="rounded-2xl px-4 py-3 shadow-2xl border border-white/10 min-w-[180px]"
                             style={{
-                                background: 'rgba(10, 10, 30, 0.92)',
-                                backdropFilter: 'blur(16px)',
-                                WebkitBackdropFilter: 'blur(16px)',
+                                background: 'rgba(6, 6, 24, 0.94)',
+                                backdropFilter: 'blur(20px)',
+                                WebkitBackdropFilter: 'blur(20px)',
+                                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05) inset',
                             }}
                         >
                             <div className="text-sm font-semibold text-white mb-2 tracking-tight">
@@ -251,7 +245,7 @@ export default function MuscleMap() {
                                     </div>
                                 ))}
                             </div>
-                            <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-xs">
+                            <div className="mt-2 pt-2 border-t border-white/8 flex items-center justify-between text-xs">
                                 <span className="text-gray-400">Total</span>
                                 <span className="text-red-400 font-medium tabular-nums">
                                     {tooltipInfo.totalSets} {tooltipInfo.totalSets === 1 ? 'set' : 'sets'}
