@@ -162,6 +162,7 @@ impl GarminApi {
         *self.oauth2.write().await = new_oauth2;
 
         // Save the new token locally
+        std::fs::create_dir_all("secrets")?;
         std::fs::write(
             "secrets/oauth2_token.json",
             serde_json::to_string_pretty(&to_save)?,

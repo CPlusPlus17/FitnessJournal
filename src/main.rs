@@ -869,6 +869,9 @@ fn write_secret_json_file<T: serde::Serialize>(
     path: &str,
     value: &T,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(path, serde_json::to_string_pretty(value)?)?;
     #[cfg(unix)]
     {
