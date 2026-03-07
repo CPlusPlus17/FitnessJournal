@@ -267,6 +267,82 @@ impl BotController {
             }
         }
 
+        // Add upcoming races & events
+        if let Ok(data) = self.garmin_client.fetch_data().await {
+            let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let upcoming_events: Vec<_> = data
+                .scheduled_workouts
+                .iter()
+                .filter(|w| {
+                    if let Some(ref it) = w.item_type {
+                        (it == "race" || it == "event" || it == "primaryEvent")
+                            && w.date >= today_str
+                    } else {
+                        false
+                    }
+                })
+                .collect();
+
+            if !upcoming_events.is_empty() {
+                context_str.push_str("\n\nUpcoming Races & Events:\n");
+                for ev in &upcoming_events {
+                    let title = ev.title.as_deref().unwrap_or("Untitled Event");
+                    let sport = ev.sport.as_deref().unwrap_or("Unknown");
+                    if let Ok(race_date) =
+                        chrono::NaiveDate::parse_from_str(&ev.date, "%Y-%m-%d")
+                    {
+                        let today_date = chrono::Local::now().naive_local().date();
+                        let days_until = (race_date - today_date).num_days();
+                        context_str.push_str(&format!(
+                            "- {} ({}) on {} — {} days away\n",
+                            title, sport, ev.date, days_until
+                        ));
+                    } else {
+                        context_str.push_str(&format!(
+                            "- {} ({}) on {}\n",
+                            title, sport, ev.date
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Add profile goals, constraints, and equipment
+        {
+            let (profile_ctx, _) = crate::load_profile_context();
+            if !profile_ctx.goals.is_empty() {
+                context_str.push_str("\n\nAthlete Goals:\n");
+                for goal in &profile_ctx.goals {
+                    context_str.push_str(&format!("- {}\n", goal));
+                }
+            }
+            if !profile_ctx.constraints.is_empty() {
+                context_str.push_str("\nConstraints:\n");
+                for c in &profile_ctx.constraints {
+                    context_str.push_str(&format!("- {}\n", c));
+                }
+            }
+            if !profile_ctx.available_equipment.is_empty() {
+                context_str.push_str("\nAvailable Equipment:\n");
+                for eq in &profile_ctx.available_equipment {
+                    context_str.push_str(&format!("- {}\n", eq));
+                }
+            }
+        }
+
+        // Add long-term strength progression (all-time PRs)
+        {
+            let db = self.database.lock().await;
+            if let Ok(progression) = db.get_progression_history() {
+                if !progression.is_empty() {
+                    context_str.push_str("\n\nAll-Time Strength PRs:\n");
+                    for line in progression.iter().take(15) {
+                        context_str.push_str(&format!("{}\n", line));
+                    }
+                }
+            }
+        }
+
         let gemini_model =
             std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
         let ai_client = crate::ai_client::AiClient::new(gemini_key.to_string(), gemini_model);
