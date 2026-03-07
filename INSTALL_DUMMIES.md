@@ -40,8 +40,9 @@ Now we need to tell your new app your secrets.
 4. Open your new `.env` file using a simple text editor (like TextEdit on Mac, or Notepad on Windows).
 5. Fill in the blanks:
    - `GEMINI_API_KEY=your_gemini_api_key_here` (Paste the key you got from [Google](https://ai.google.dev/gemini-api/docs/models))
-   - `GEMINI_MODEL=gemini-3-flash-preview` (To Change the AI Model, paste the model name here)
+   - `GEMINI_MODEL=gemini-3-flash-preview` (To change the AI model, paste the model name here)
    - `SIGNAL_PHONE_NUMBER=+1234567890` (Put your bot's phone number here. Include the `+` and country code!)
+   - `SIGNAL_SUBSCRIBERS=+1234567890` (Put your personal phone number here so the bot sends you automatic notifications!)
    - `API_AUTH_TOKEN=make_up_a_long_password` (Just type a random string of characters here to protect your data. You won't ever need to remember this password).
 6. **Save** the file and close it.
 
@@ -117,3 +118,35 @@ You're at the final step!
 5. Open your personal Signal app, add your bot's phone number as a contact, and say hello! Try sending the exact message: `/status`
 
 **🎉 Congratulations! You have successfully installed and deployed your own private AI fitness coach!**
+
+---
+
+## 🎯 Phase 7: Getting to Know Your Coach
+
+Now that everything is running, here's everything the bot can do:
+
+### Signal Commands
+- **`/status`** — See your Body Battery, Sleep Score, and today's planned workouts.
+- **`/generate`** — Generate a fresh weekly workout plan and sync it to your Garmin calendar.
+- **`/macros 2500 150`** — Log your daily calories and protein intake.
+- **`/readiness`** — Get an AI assessment of how ready you are for your next race.
+
+### Free-Text Chat
+Just type naturally! Ask anything like _"How's my training going?"_ or _"Should I run today?"_ — the AI knows your recent workouts, recovery data, goals, and upcoming events.
+
+### Automatic Notifications
+The bot will automatically message you with:
+- ☀️ **Morning briefings** if you have workouts scheduled that day
+- 📈 **Weekly reviews** summarizing your training and recovery
+- 📅 **Monthly debriefs** comparing your progress month-over-month
+- 🏁 **Race readiness updates** at 14, 7, and 2 days before your events
+
+### Dashboard
+Visit [http://localhost:3000](http://localhost:3000) anytime to see:
+- 💪 Interactive muscle heatmap showing recent training focus
+- 📊 Recovery charts (body battery, sleep, HRV)
+- 🏋️ Strength progression tracking
+- 📅 Upcoming workouts and events
+- 💬 AI coaching chat
+
+To customize your goals and equipment, visit [http://localhost:3000/settings](http://localhost:3000/settings) (you'll be asked for a username/password — use `admin` and your `API_AUTH_TOKEN` value from the `.env` file).

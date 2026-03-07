@@ -115,7 +115,11 @@ Once your Signal number is registered and verified, you can launch the complete 
 docker-compose up -d --build
 ```
 
-This will build the Rust binary and start the `fitness-coach` bot daemon alongside the `signal-api`.
+This will build and start all four services:
+- `signal-api` — Signal network bridge (JSON-RPC mode)
+- `fitness-coach` — Signal bot + daemon (auto-fetches Garmin data every 5 minutes)
+- `fitness-api` — REST API server for the dashboard
+- `fitness-web` — Next.js dashboard (available at `http://localhost:3000`)
 
 ## Release Checklist
 
@@ -175,15 +179,36 @@ After deployment:
 
 Send a message on Signal to the bot phone number you registered to interact with it.
 
-- `/status` -> Returns your current Body Battery, Sleep Score, and today's planned workouts.
-- `/generate` -> Triggers the LLM to analyze your recent health/activity data, generate a new plan, and upload it to your Garmin calendar.
-- `/macros <kcal> <protein>` -> Logs your nutrition for the day to the local `fitness_journal.db`. (e.g., `/macros 2500 150`)
+### Commands
+- `/status` → Returns your current Body Battery, Sleep Score, and today's planned workouts.
+- `/generate` → Triggers the AI coach to analyze your recent health/activity data, generate a new weekly plan, and upload it to your Garmin calendar.
+- `/macros <kcal> <protein>` → Logs your nutrition for the day (e.g., `/macros 2500 150`).
+- `/readiness` → AI-powered race readiness assessment based on your upcoming events and recent training data.
+
+### Free-Text Chat
+Any message that doesn't start with `/` is handled as a **conversational AI coaching session**. The AI coach has full context of your:
+- Current body battery, sleep score, and today's workouts
+- Last 7 days of activities and coach feedback
+- Upcoming races/events with countdown
+- Your profile goals, constraints, and equipment
+- Top 15 all-time strength PRs
+
+The AI can even schedule workouts to your Garmin calendar directly from the conversation.
+
+### Scheduled Notifications
+The bot automatically broadcasts the following to all configured subscribers:
+- **Morning Briefing** — daily workout reminder
+- **Weekly Review** — AI-generated volume and recovery analysis
+- **Monthly Debrief** — month-over-month training comparison with peak weights
+- **Race Readiness** — triggers at 14, 7, and 2 days before races/events
+- **Strength Validation** — daily check that scheduled Garmin workouts match the AI-generated specs
+- **Auto Activity Analysis** — AI analysis of recently completed activities (configurable by sport type)
 
 ## Architecture
 
-- **`src/*.rs`**: The main Rust application, API server, and Signal WebSocket listener. Garmin Connect logic (authentication, data fetching, and workout construction) is implemented entirely in native Rust. 
-- **`dashboard/`**: A React-based frontend dashboard configured with Next.js and `react-body-highlighter` to visualize scheduled workouts and muscle fatigue.
-- **`fitness_journal.db`**: Local SQLite database storing workout logs, exercise metadata, and max progression tracking.
+- **`src/*.rs`**: The main Rust application (11 modules), API server, and Signal WebSocket listener. Garmin Connect logic (authentication, data fetching, and workout construction) is implemented entirely in native Rust with OAuth1/OAuth2 token management.
+- **`dashboard/`**: Next.js 16 dashboard with App Router, React 19, Tailwind CSS 4. Features muscle heatmap, recovery charts, strength progression tracking, AI chat, activity analysis, event readiness assessment, and profile settings management.
+- **`fitness_journal.db`**: Local SQLite database storing workout logs, exercise history, chat logs, coach briefs, recovery metrics, activity analyses, Garmin cache, and nutrition logs.
 
 ## Running the Dashboard
 
@@ -221,18 +246,31 @@ This project was built with reference to the following open-source projects:
 **Recent Features (Since `eda6f0f8d5dba6884c5784c94543d2325da0c3a1`)**
 - **Configuration**
   - Implemented centralized configuration management using `figment` to load settings from a `Fitness.toml` file or environment variables, supporting `[dry_run]` profiles safely.
+  - Multi-profile management via `profiles.json` with dashboard settings UI.
 - **Bot & Conversational AI**
   - Conversational AI coach with live Garmin context, flexible workout scheduling, and chat history persistence.
+  - Enriched conversation context with: upcoming races/events (with countdown), profile goals/constraints/equipment, and all-time strength PRs.
   - Enhanced bot context with recent activities, aligned Garmin daemon frequency to 5 minutes, and included AI analysis summaries.
   - Implemented AI-powered automatic activity analysis and Signal broadcasts based on configured sports in user profiles.
   - Improved bot message parsing for sender/destination and enhanced "note to self" message detection via UUIDs.
   - Introduced daily morning workout briefings, post-generation workout summaries, and chat message timestamps.
+  - `/readiness` command: on-demand AI race readiness assessment.
 - **AI Assessments & Dashboards**
-  - Introduced AI-powered monthly debriefs and race readiness assessments with new bot commands and scheduled notifiers.
+  - Introduced AI-powered monthly debriefs and race readiness assessments with scheduled notifiers (14/7/2 days before events).
   - Weekly AI coach review notification and coach brief history in the dashboard UI.
   - Added recovery history chart to the dashboard, including new API endpoints and database storage for daily recovery metrics.
+  - AI-powered upcoming event analysis with full athlete context (recovery, recent activities, VO2 Max).
   - Refined workout type extraction logic, replaced body highlighter library with `@mjcdev/react-body-highlighter`, and added gender selection to the muscle map.
   - AI-powered workout duration prediction with API endpoints, database caching, and frontend UX enhancements.
+  - Daily strength workout validation: compares Garmin scheduled workouts against generated specs and auto-corrects mismatches.
+- **Coaching Intelligence**
+  - Coaching memory: previous plan response is fed back into the next brief for continuity.
+  - Week-over-week strength progression deltas included in coaching briefs.
+  - Adherence tracking: compares `generated_workouts.json` against actual Garmin activities to report completion rates.
+  - Restart safeguard: prevents accidental workout re-generation when containers restart with empty Garmin cache.
 - **Refactoring & Tech Debt Checkups**
   - Migrated CLI argument parsing to `clap` and replaced `println!` and `eprintln!` with `tracing` macros for structured logs.
+  - SQLite switched to DELETE journal mode with `synchronous = FULL` for Docker compatibility.
+  - Atomic file writes for profiles persistence with Docker bind-mount fallback.
   - Improved workout parsing synchronization and enhanced SQLite initialization robustness.
+  - Sliding window rate limiters for chat and generate API endpoints.
