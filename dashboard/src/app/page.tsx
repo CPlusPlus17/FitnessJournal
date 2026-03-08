@@ -291,6 +291,12 @@ type WeekActivity = {
   duration?: number;
   distance?: number;
   averageHR?: number;
+  maxHR?: number;
+  calories?: number;
+  averageSpeed?: number;
+  elevationGain?: number;
+  avgPower?: number;
+  sets?: unknown;
 };
 
 async function fetchWeekActivities(): Promise<WeekActivity[]> {
@@ -391,36 +397,56 @@ export default async function Dashboard() {
           <div className="glass-panel hover-lift p-4 flex flex-col justify-center group relative overflow-hidden stagger-item h-full" style={{ '--stagger-index': 2 } as React.CSSProperties}>
             <div className="ambient-glow-sm bg-red-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
             <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">Body Battery</h3>
-            <div className="mt-2 flex items-end gap-2 text-white group-hover:text-red-400 transition-colors duration-300">
-              <span className="text-4xl font-bold tracking-tighter">{recovery.body_battery ?? '--'}</span>
-              <span className="text-gray-500 mb-1 text-xs">/100</span>
+            <div className="mt-2 flex items-center justify-between">
+              <div className="flex items-end gap-2 text-white group-hover:text-red-400 transition-colors duration-300">
+                <span className="text-4xl font-bold tracking-tighter">{recovery.body_battery ?? '--'}</span>
+                <span className="text-gray-500 mb-1 text-xs">/100</span>
+              </div>
+              {recoveryHistory.length > 1 && (
+                <div className="w-16 h-8">
+                  <Sparkline history={recoveryHistory.filter(e => e.body_battery != null).map(e => ({ weight: e.body_battery!, date: e.date }))} />
+                </div>
+              )}
             </div>
-            <div className="mt-1 text-[10px] text-gray-600 uppercase tracking-widest">Garmin Connect</div>
           </div>
 
           {/* Sleep Score */}
           <div className="glass-panel hover-lift p-4 flex flex-col justify-center group relative overflow-hidden stagger-item h-full" style={{ '--stagger-index': 3 } as React.CSSProperties}>
             <div className="ambient-glow-sm bg-indigo-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
             <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">Sleep Score</h3>
-            <div className="mt-2 flex items-end gap-2 text-white group-hover:text-indigo-400 transition-colors duration-300">
-              <span className="text-4xl font-bold tracking-tighter">{recovery.sleep_score ?? '--'}</span>
-              <span className="text-gray-500 mb-1 text-xs">/100</span>
+            <div className="mt-2 flex items-center justify-between">
+              <div className="flex items-end gap-2 text-white group-hover:text-indigo-400 transition-colors duration-300">
+                <span className="text-4xl font-bold tracking-tighter">{recovery.sleep_score ?? '--'}</span>
+                <span className="text-gray-500 mb-1 text-xs">/100</span>
+              </div>
+              {recoveryHistory.length > 1 && (
+                <div className="w-16 h-8">
+                  <Sparkline history={recoveryHistory.filter(e => e.sleep_score != null).map(e => ({ weight: e.sleep_score!, date: e.date }))} />
+                </div>
+              )}
             </div>
-            <div className="mt-1 text-[10px] text-gray-600 uppercase tracking-widest">Garmin Connect</div>
           </div>
 
           {/* HRV */}
           <div className="glass-panel hover-lift p-4 flex flex-col justify-center group relative overflow-hidden stagger-item h-full" style={{ '--stagger-index': 4 } as React.CSSProperties}>
             <div className="ambient-glow-sm bg-purple-500 -top-6 -right-6 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
             <h3 className="text-gray-400 font-medium tracking-wide text-xs uppercase">HRV</h3>
-            <div className="mt-2 flex flex-col gap-0.5">
-              <div className="text-3xl font-bold tracking-tight text-purple-400">
-                {recovery.hrv_last_night_avg ?? '--'} <span className="text-sm font-normal text-gray-500">ms</span>
+            <div className="mt-2 flex items-center justify-between">
+              <div className="flex flex-col gap-0.5">
+                <div className="text-3xl font-bold tracking-tight text-purple-400">
+                  {recovery.hrv_last_night_avg ?? '--'} <span className="text-sm font-normal text-gray-500">ms</span>
+                </div>
+                <div className="text-xs text-gray-500">
+                  <span>{recovery.hrv_status ?? '--'}</span>
+                  {' · '}
+                  <span>7d: {recovery.hrv_weekly_avg ?? '--'} ms</span>
+                </div>
               </div>
-              <div className="text-xs text-gray-500 flex items-center justify-between">
-                <span>{recovery.hrv_status ?? '--'}</span>
-                <span>7d: {recovery.hrv_weekly_avg ?? '--'} ms</span>
-              </div>
+              {recoveryHistory.length > 1 && (
+                <div className="w-16 h-8">
+                  <Sparkline history={recoveryHistory.filter(e => e.hrv_last_night_avg != null).map(e => ({ weight: e.hrv_last_night_avg!, date: e.date }))} />
+                </div>
+              )}
             </div>
           </div>
 

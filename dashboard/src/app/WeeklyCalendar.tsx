@@ -27,6 +27,11 @@ type WeekActivity = {
     duration?: number;
     distance?: number;
     averageHR?: number;
+    maxHR?: number;
+    calories?: number;
+    averageSpeed?: number;
+    elevationGain?: number;
+    avgPower?: number;
     sets?: any;
 };
 
@@ -94,7 +99,108 @@ function isRunWorkout(w: PlannedWorkout): boolean {
     return sport.includes('run') || sport.includes('trail');
 }
 
-type WorkoutStep = { label: string; detail?: string };
+type WorkoutStep = { label: string; detail?: string; indent?: number };
+
+function fmtPace(v: number) { const m = Math.floor(v / 60); const s = Math.round(v % 60); return `${m}:${String(s).padStart(2, '0')}`; }
+
+function fmtDuration(secs: number): string {
+    const mins = Math.floor(secs / 60);
+    const s = Math.round(secs % 60);
+    return s > 0 ? `${mins}:${String(s).padStart(2, '0')}` : `${mins} min`;
+}
+
+function formatStepDetail(step: any): string | undefined {
+    const endCond = step?.endCondition;
+    const condType = endCond?.conditionTypeKey || '';
+    const condVal = step?.endConditionValue ?? endCond?.value;
+    let detail: string | undefined;
+
+    if (condType === 'distance' && condVal) {
+        detail = `${(condVal / 1000).toFixed(2)} km`;
+    } else if (condType === 'time' && condVal) {
+        detail = fmtDuration(condVal);
+    } else if (condType === 'lap.button') {
+        detail = 'Lap button';
+    }
+
+    const target = step?.targetType?.workoutTargetTypeKey;
+    if (target && target !== 'no.target') {
+        const from = step?.targetValueOne;
+        const to = step?.targetValueTwo;
+        if (target === 'pace.zone' && from && to) {
+            detail = (detail ? detail + ' · ' : '') + `${fmtPace(from)}-${fmtPace(to)}/km`;
+        } else if (target === 'heart.rate.zone' && from && to) {
+            detail = (detail ? detail + ' · ' : '') + `${Math.round(from)}-${Math.round(to)} bpm`;
+        }
+    }
+    return detail;
+}
+
+function stepLabel(step: any): string {
+    const stepType = step?.stepType?.stepTypeKey || '';
+    const exName = step?.exerciseName
+        ? String(step.exerciseName).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+        : null;
+    if (stepType === 'warmup') return exName || 'Warm Up';
+    if (stepType === 'cooldown') return exName || 'Cool Down';
+    if (stepType === 'interval') return exName || 'Interval';
+    if (stepType === 'recovery') return exName || 'Recovery';
+    if (stepType === 'rest') return exName || 'Rest';
+    return exName || stepType || 'Step';
+}
+
+function processSteps(stepsArr: any[], into: WorkoutStep[], indent: number, repeatPrefix?: string) {
+    for (const step of stepsArr) {
+        const stepType = step?.stepType?.stepTypeKey || step?.type || '';
+
+        if (step?.type === 'RepeatGroupDTO' || stepType === 'repeat') {
+            const reps = step.numberOfIterations || step.endConditionValue || 1;
+            const innerSteps = step.workoutSteps;
+            if (!Array.isArray(innerSteps)) continue;
+
+            // Check if this is a strength repeat (exercises with weight/reps) or a cardio repeat (intervals)
+            const isStrength = innerSteps.some((s: any) =>
+                s?.weightValue != null || s?.repValue != null ||
+                (s?.endCondition?.conditionTypeKey === 'reps')
+            );
+
+            if (isStrength) {
+                for (const inner of innerSteps) {
+                    const innerType = inner?.stepType?.stepTypeKey || '';
+                    if (innerType === 'rest') continue;
+                    const rawName = inner?.exerciseName || inner?.category || inner?.description || 'Exercise';
+                    const exName = typeof rawName === 'string'
+                        ? rawName.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+                        : typeof rawName === 'object' ? (rawName as any)?.exerciseName || 'Exercise' : String(rawName);
+                    const weight = typeof inner?.weightValue === 'number' ? inner.weightValue : inner?.weightValue?.value;
+                    const repCount = (inner?.endCondition?.conditionTypeKey === 'reps' ? inner?.endConditionValue : null)
+                        || inner?.repValue?.value || inner?.repValue;
+                    let detail = `${reps}x`;
+                    if (repCount) detail += ` ${Math.round(repCount)} reps`;
+                    if (weight) detail += ` @ ${weight}kg`;
+                    into.push({ label: exName, detail, indent });
+                }
+            } else {
+                // Cardio repeat group — show header then expand inner steps
+                const prefix = repeatPrefix ? `${repeatPrefix}${Math.round(reps)} × ` : `${Math.round(reps)} × `;
+                into.push({ label: `Repeat`, detail: `${prefix}`, indent });
+                processSteps(innerSteps, into, indent + 1);
+            }
+            continue;
+        }
+
+        if (stepType === 'rest') {
+            // Show rest steps inside repeat groups with their duration
+            const detail = formatStepDetail(step);
+            if (detail) {
+                into.push({ label: 'Rest', detail, indent });
+            }
+            continue;
+        }
+
+        into.push({ label: stepLabel(step), detail: formatStepDetail(step), indent });
+    }
+}
 
 function extractWorkoutSteps(w: PlannedWorkout): WorkoutStep[] {
     const steps: WorkoutStep[] = [];
@@ -107,78 +213,20 @@ function extractWorkoutSteps(w: PlannedWorkout): WorkoutStep[] {
         for (const seg of segments) {
             const wSteps = seg?.workoutSteps;
             if (!Array.isArray(wSteps)) continue;
-
-            for (const step of wSteps) {
-                const stepType = step?.stepType?.stepTypeKey || step?.type || '';
-
-                if (step?.type === 'RepeatGroupDTO' || stepType === 'repeat') {
-                    const sets = step.numberOfIterations || step.endConditionValue || 1;
-                    const innerSteps = step.workoutSteps;
-                    if (Array.isArray(innerSteps)) {
-                        for (const inner of innerSteps) {
-                            const innerType = inner?.stepType?.stepTypeKey || '';
-                            if (innerType === 'rest') continue;
-                            const rawName = inner?.exerciseName || inner?.category || inner?.description || 'Exercise';
-                            const exName = typeof rawName === 'string'
-                                ? rawName.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
-                                : typeof rawName === 'object' ? (rawName as any)?.exerciseName || 'Exercise' : String(rawName);
-                            const weight = typeof inner?.weightValue === 'number' ? inner.weightValue
-                                : inner?.weightValue?.value;
-                            const repCount = (inner?.endCondition?.conditionTypeKey === 'reps' ? inner?.endConditionValue : null)
-                                || inner?.repValue?.value || inner?.repValue;
-                            let detail = `${sets}x`;
-                            if (repCount) detail += ` ${Math.round(repCount)} reps`;
-                            if (weight) detail += ` @ ${weight}kg`;
-                            steps.push({ label: exName, detail });
-                        }
-                    }
-                    continue;
-                }
-
-                if (stepType === 'rest') continue;
-                const exName = step?.exerciseName
-                    ? String(step.exerciseName).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
-                    : null;
-                const typeLabel = stepType === 'warmup' ? (exName || 'Warm Up')
-                    : stepType === 'cooldown' ? (exName || 'Cool Down')
-                    : stepType === 'interval' ? (exName || 'Run')
-                    : stepType === 'recovery' ? 'Recovery'
-                    : stepType || 'Step';
-
-                const endCond = step?.endCondition;
-                const condType = endCond?.conditionTypeKey || '';
-                const condVal = step?.endConditionValue ?? endCond?.value;
-                let detail: string | undefined;
-
-                if (condType === 'distance' && condVal) {
-                    detail = `${(condVal / 1000).toFixed(2)} km`;
-                } else if (condType === 'time' && condVal) {
-                    const mins = Math.floor(condVal / 60);
-                    const secs = Math.round(condVal % 60);
-                    detail = secs > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : `${mins} min`;
-                } else if (condType === 'lap.button') {
-                    detail = 'Lap button';
-                }
-
-                const target = step?.targetType?.workoutTargetTypeKey;
-                if (target && target !== 'no.target') {
-                    const from = step?.targetValueOne;
-                    const to = step?.targetValueTwo;
-                    if (target === 'pace.zone' && from && to) {
-                        const fmtPace = (v: number) => { const m = Math.floor(v / 60); const s = Math.round(v % 60); return `${m}:${String(s).padStart(2, '0')}`; };
-                        detail = (detail ? detail + ' · ' : '') + `${fmtPace(from)}-${fmtPace(to)}/km`;
-                    } else if (target === 'heart.rate.zone' && from && to) {
-                        detail = (detail ? detail + ' · ' : '') + `${Math.round(from)}-${Math.round(to)} bpm`;
-                    }
-                }
-
-                steps.push({ label: typeLabel, detail });
-            }
+            processSteps(wSteps, steps, 0);
         }
         if (steps.length > 0) break;
     }
 
     return steps;
+}
+
+/** Format a Date as YYYY-MM-DD in local time (avoids UTC shift from toISOString) */
+function toLocalDateKey(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
 }
 
 export default function WeeklyCalendar({ upcomingWorkouts, todayPlanned, completedCount, weekActivities = [] }: WeeklyCalendarProps) {
@@ -203,7 +251,7 @@ export default function WeeklyCalendar({ upcomingWorkouts, todayPlanned, complet
 
     // Group planned workouts by date string (YYYY-MM-DD)
     const workoutsByDate: Record<string, PlannedWorkout[]> = {};
-    const todayKey = today.toISOString().substring(0, 10);
+    const todayKey = toLocalDateKey(today);
     workoutsByDate[todayKey] = [...todayPlanned];
 
     for (const w of upcomingWorkouts || []) {
@@ -221,14 +269,23 @@ export default function WeeklyCalendar({ upcomingWorkouts, todayPlanned, complet
     }
 
     // Group completed activities by date
-    const doneByDate: Record<string, { label: string; sport: string; duration?: number; distance?: number; averageHR?: number }[]> = {};
+    type DoneActivity = {
+        label: string; sport: string; duration?: number; distance?: number;
+        averageHR?: number; maxHR?: number; calories?: number;
+        averageSpeed?: number; elevationGain?: number; avgPower?: number;
+    };
+    const doneByDate: Record<string, DoneActivity[]> = {};
     for (const act of weekActivities || []) {
         if (!act || !act.startTimeLocal) continue;
         const key = act.startTimeLocal.substring(0, 10);
         if (!doneByDate[key]) doneByDate[key] = [];
         const actName = act.name || extractTypeStr(act.activity_type) || extractTypeStr(act.type) || 'Activity';
         const actSport = extractTypeStr(act.sport) || extractTypeStr(act.activity_type) || extractTypeStr(act.type) || '';
-        doneByDate[key].push({ label: actName, sport: actSport, duration: act.duration, distance: act.distance, averageHR: act.averageHR });
+        doneByDate[key].push({
+            label: actName, sport: actSport, duration: act.duration, distance: act.distance,
+            averageHR: act.averageHR, maxHR: act.maxHR, calories: act.calories,
+            averageSpeed: act.averageSpeed, elevationGain: act.elevationGain, avgPower: act.avgPower,
+        });
     }
 
     return (
@@ -244,7 +301,7 @@ export default function WeeklyCalendar({ upcomingWorkouts, todayPlanned, complet
 
             <div className="space-y-1">
                 {days.map((day) => {
-                    const dateKey = day.date.toISOString().substring(0, 10);
+                    const dateKey = toLocalDateKey(day.date);
                     const planned = workoutsByDate[dateKey] || [];
                     const done = doneByDate[dateKey] || [];
                     const hasItems = planned.length > 0 || done.length > 0;
@@ -332,10 +389,28 @@ export default function WeeklyCalendar({ upcomingWorkouts, todayPlanned, complet
                                                     </div>
                                                     <span className="text-[10px] text-gray-600">{d.sport}</span>
                                                 </div>
-                                                <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400">
+                                                <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-[11px] text-gray-400">
                                                     {d.duration != null && <span>{(d.duration / 60).toFixed(0)} min</span>}
                                                     {d.distance != null && d.distance > 0 && <span>{(d.distance / 1000).toFixed(1)} km</span>}
-                                                    {d.averageHR != null && <span>{Math.round(d.averageHR)} bpm avg</span>}
+                                                    {d.averageHR != null && <span>{Math.round(d.averageHR)} avg / {d.maxHR ? Math.round(d.maxHR) : '--'} max bpm</span>}
+                                                    {d.calories != null && d.calories > 0 && <span>{Math.round(d.calories)} kcal</span>}
+                                                    {d.averageSpeed != null && d.averageSpeed > 0 && d.distance != null && d.distance > 0 && (
+                                                        <span>
+                                                            {(() => {
+                                                                // averageSpeed is m/s — convert to pace min/km for running, km/h for cycling
+                                                                const isRun = d.sport.toLowerCase().includes('run') || d.sport.toLowerCase().includes('trail');
+                                                                if (isRun) {
+                                                                    const paceS = 1000 / d.averageSpeed!;
+                                                                    const m = Math.floor(paceS / 60);
+                                                                    const s = Math.round(paceS % 60);
+                                                                    return `${m}:${String(s).padStart(2, '0')}/km`;
+                                                                }
+                                                                return `${(d.averageSpeed! * 3.6).toFixed(1)} km/h`;
+                                                            })()}
+                                                        </span>
+                                                    )}
+                                                    {d.elevationGain != null && d.elevationGain > 0 && <span>{Math.round(d.elevationGain)} m elev</span>}
+                                                    {d.avgPower != null && d.avgPower > 0 && <span>{Math.round(d.avgPower)} W avg</span>}
                                                 </div>
                                             </div>
                                         );
@@ -369,8 +444,8 @@ export default function WeeklyCalendar({ upcomingWorkouts, todayPlanned, complet
                                                 {steps.length > 0 && (
                                                     <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-0.5">
                                                         {steps.map((s, si) => (
-                                                            <div key={si} className="flex items-baseline justify-between gap-2 text-[11px]">
-                                                                <span className="text-gray-300 truncate">{s.label}</span>
+                                                            <div key={si} className="flex items-baseline justify-between gap-2 text-[11px]" style={s.indent ? { paddingLeft: `${s.indent * 12}px` } : undefined}>
+                                                                <span className={`truncate ${s.indent ? 'text-gray-400' : 'text-gray-300'}`}>{s.label}</span>
                                                                 {s.detail && <span className="text-gray-500 whitespace-nowrap flex-shrink-0">{s.detail}</span>}
                                                             </div>
                                                         ))}

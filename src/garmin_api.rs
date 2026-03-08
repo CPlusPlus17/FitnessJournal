@@ -423,6 +423,7 @@ impl GarminApi {
         self.connectapi_get(&endpoint).await
     }
 
+
     pub async fn get_sleep_data(
         &self,
         display_name: &str,

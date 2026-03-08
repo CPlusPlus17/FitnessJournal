@@ -149,12 +149,11 @@ impl GarminClient {
                                         );
                                         if seen_keys.insert(key) {
                                             if it == "fbtAdaptiveWorkout" {
-                                                let uuid_val = sw.raw_fields.get("uuid").and_then(|v| v.as_str());
-                                                let id_val = sw.raw_fields.get("id").and_then(|v| v.as_str());
-                                                let id_num = sw.raw_fields.get("id").and_then(|v| v.as_u64());
-                                                let target = uuid_val.map(|s| s.to_string())
-                                                    .or_else(|| id_val.map(|s| s.to_string()))
-                                                    .or_else(|| id_num.map(|n| n.to_string()));
+                                                // Try workoutUuid first, then uuid, then id
+                                                let target = sw.raw_fields.get("workoutUuid").and_then(|v| v.as_str()).map(|s| s.to_string())
+                                                    .or_else(|| sw.raw_fields.get("uuid").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                                                    .or_else(|| sw.raw_fields.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                                                    .or_else(|| sw.raw_fields.get("id").and_then(|v| v.as_u64()).map(|n| n.to_string()));
 
                                                 if let Some(target_id) = target {
                                                     match self.api.get_adaptive_workout_details(&target_id).await {
@@ -164,9 +163,16 @@ impl GarminClient {
                                                 }
                                             }
 
-                                            // Fetch full workout detail (with segments/steps) for workouts with a workoutId
-                                            let wid_val = sw.raw_fields.get("workoutId");
+                                            // Fetch full workout detail (with segments/steps) for workouts with a workoutId.
+                                            // Check: raw calendar item → adaptive_details top-level → nested workout/adaptiveWorkout objects
+                                            let wid_val = sw.raw_fields.get("workoutId")
+                                                .or_else(|| sw.adaptive_details.as_ref().and_then(|ad| {
+                                                    ad.get("workoutId")
+                                                        .or_else(|| ad.get("workout").and_then(|w| w.get("workoutId")))
+                                                        .or_else(|| ad.get("adaptiveWorkout").and_then(|w| w.get("workoutId")))
+                                                }));
                                             let wid_i64 = wid_val.and_then(|v| v.as_i64()).or_else(|| wid_val.and_then(|v| v.as_u64()).map(|u| u as i64));
+
                                             if let Some(wid) = wid_i64 {
                                                 if wid > 0 {
                                                     info!("Fetching workout detail for '{}' (workoutId={})", sw.title.as_deref().unwrap_or("?"), wid);
@@ -176,6 +182,7 @@ impl GarminClient {
                                                     }
                                                 }
                                             }
+
 
                                             scheduled_workouts.push(sw);
                                         }
