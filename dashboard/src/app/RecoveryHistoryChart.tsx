@@ -40,7 +40,7 @@ export default function RecoveryHistoryChart({ data }: { data: RecoveryHistoryEn
     }
 
     return (
-        <div className="w-full h-[300px]">
+        <div className="w-full h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <defs>

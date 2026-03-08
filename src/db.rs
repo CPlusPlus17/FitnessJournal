@@ -103,10 +103,27 @@ impl Database {
                 training_readiness INTEGER,
                 hrv_last_night_avg INTEGER,
                 hrv_status TEXT,
-                rhr INTEGER
+                rhr INTEGER,
+                body_battery_max INTEGER,
+                sleep_score_max INTEGER,
+                training_readiness_max INTEGER
             )",
             [],
         )?;
+
+        // Migrations: add max columns for existing databases
+        let _ = conn.execute(
+            "ALTER TABLE recovery_metrics_history ADD COLUMN body_battery_max INTEGER",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE recovery_metrics_history ADD COLUMN sleep_score_max INTEGER",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE recovery_metrics_history ADD COLUMN training_readiness_max INTEGER",
+            [],
+        );
 
         Ok(Database { conn })
     }
@@ -603,14 +620,18 @@ impl Database {
 
         self.conn.execute(
             "INSERT INTO recovery_metrics_history (
-                date, body_battery, sleep_score, training_readiness, 
-                hrv_last_night_avg, hrv_status, rhr
-            ) 
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(date) DO UPDATE SET 
+                date, body_battery, sleep_score, training_readiness,
+                hrv_last_night_avg, hrv_status, rhr,
+                body_battery_max, sleep_score_max, training_readiness_max
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?2, ?3, ?4)
+            ON CONFLICT(date) DO UPDATE SET
                 body_battery = excluded.body_battery,
+                body_battery_max = MAX(COALESCE(recovery_metrics_history.body_battery_max, 0), COALESCE(excluded.body_battery, 0)),
                 sleep_score = excluded.sleep_score,
+                sleep_score_max = MAX(COALESCE(recovery_metrics_history.sleep_score_max, 0), COALESCE(excluded.sleep_score, 0)),
                 training_readiness = excluded.training_readiness,
+                training_readiness_max = MAX(COALESCE(recovery_metrics_history.training_readiness_max, 0), COALESCE(excluded.training_readiness, 0)),
                 hrv_last_night_avg = excluded.hrv_last_night_avg,
                 hrv_status = excluded.hrv_status,
                 rhr = excluded.rhr",
@@ -701,8 +722,8 @@ impl Database {
 
     pub fn get_recovery_history(&self, days: u32) -> Result<Vec<RecoveryHistoryEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT date, body_battery, sleep_score, training_readiness, hrv_last_night_avg, hrv_status, rhr 
-             FROM recovery_metrics_history 
+            "SELECT date, COALESCE(body_battery_max, body_battery), COALESCE(sleep_score_max, sleep_score), COALESCE(training_readiness_max, training_readiness), hrv_last_night_avg, hrv_status, rhr
+             FROM recovery_metrics_history
              WHERE date >= date('now', ?1)
              ORDER BY date ASC",
         )?;

@@ -44,6 +44,10 @@ pub struct AppConfig {
     pub chat_rate_limit_per_minute: usize,
     pub generate_rate_limit_per_hour: usize,
 
+    // Course / Location Settings
+    pub default_start_latitude: Option<f64>,
+    pub default_start_longitude: Option<f64>,
+
     // AI/Gemini Settings
     pub gemini_api_key: String,
     pub fitness_debug_prompt: bool,
@@ -70,6 +74,8 @@ impl Default for AppConfig {
             api_bind_addr: "127.0.0.1:3001".to_string(),
             chat_rate_limit_per_minute: 30,
             generate_rate_limit_per_hour: 6,
+            default_start_latitude: None,
+            default_start_longitude: None,
             gemini_api_key: "".to_string(),
             fitness_debug_prompt: false,
         }

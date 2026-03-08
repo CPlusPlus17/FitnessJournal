@@ -14,6 +14,7 @@ const ALLOWED_PATHS = new Set([
   'analyze',
   'analyze/upcoming',
   'force-pull',
+  'course/create',
 ]);
 
 export const dynamic = 'force-dynamic';

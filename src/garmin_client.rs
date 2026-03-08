@@ -7,6 +7,16 @@ use crate::db::Database;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Haversine distance in meters between two lat/lng points.
+fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let r = 6_371_000.0; // Earth radius in meters
+    let d_lat = (lat2 - lat1).to_radians();
+    let d_lon = (lon2 - lon1).to_radians();
+    let a = (d_lat / 2.0).sin().powi(2)
+        + lat1.to_radians().cos() * lat2.to_radians().cos() * (d_lon / 2.0).sin().powi(2);
+    r * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
+}
+
 pub const AI_WORKOUT_PREFIX: &str = "FJ-AI:";
 
 pub fn is_ai_managed_workout(name: &str) -> bool {
@@ -124,7 +134,7 @@ impl GarminClient {
                         match serde_json::from_value::<crate::models::ScheduledWorkout>(
                             item.clone(),
                         ) {
-                            Ok(sw) => {
+                            Ok(mut sw) => {
                                 if let Some(ref it) = sw.item_type {
                                     if it == "workout"
                                         || it == "fbtAdaptiveWorkout"
@@ -138,6 +148,35 @@ impl GarminClient {
                                             sw.title.as_deref().unwrap_or("")
                                         );
                                         if seen_keys.insert(key) {
+                                            if it == "fbtAdaptiveWorkout" {
+                                                let uuid_val = sw.raw_fields.get("uuid").and_then(|v| v.as_str());
+                                                let id_val = sw.raw_fields.get("id").and_then(|v| v.as_str());
+                                                let id_num = sw.raw_fields.get("id").and_then(|v| v.as_u64());
+                                                let target = uuid_val.map(|s| s.to_string())
+                                                    .or_else(|| id_val.map(|s| s.to_string()))
+                                                    .or_else(|| id_num.map(|n| n.to_string()));
+
+                                                if let Some(target_id) = target {
+                                                    match self.api.get_adaptive_workout_details(&target_id).await {
+                                                        Ok(details) => sw.adaptive_details = Some(details),
+                                                        Err(e) => info!("Failed to get adaptive details for {}: {}", target_id, e),
+                                                    }
+                                                }
+                                            }
+
+                                            // Fetch full workout detail (with segments/steps) for workouts with a workoutId
+                                            let wid_val = sw.raw_fields.get("workoutId");
+                                            let wid_i64 = wid_val.and_then(|v| v.as_i64()).or_else(|| wid_val.and_then(|v| v.as_u64()).map(|u| u as i64));
+                                            if let Some(wid) = wid_i64 {
+                                                if wid > 0 {
+                                                    info!("Fetching workout detail for '{}' (workoutId={})", sw.title.as_deref().unwrap_or("?"), wid);
+                                                    match self.api.get_workout_by_id(wid).await {
+                                                        Ok(detail) => sw.workout_detail = Some(detail),
+                                                        Err(e) => info!("Failed to get workout detail for {}: {}", wid, e),
+                                                    }
+                                                }
+                                            }
+
                                             scheduled_workouts.push(sw);
                                         }
                                     }
@@ -479,6 +518,211 @@ impl GarminClient {
                 "Could not schedule: missing workout id or date."
             ))
         }
+    }
+
+    /// Creates a loop course on Garmin Connect for a run workout.
+    /// Uses Garmin's round-trip route API for real road/trail routes,
+    /// falling back to a synthetic circle if the API fails.
+    pub async fn create_course_for_workout(
+        &self,
+        name: &str,
+        distance_m: f64,
+        lat: f64,
+        lng: f64,
+    ) -> Result<serde_json::Value> {
+        // Try Garmin's round-trip route API first for real road/trail routes
+        let geo_points = match self.api.get_round_trip_route(lat, lng, distance_m).await {
+            Ok(route_coords) => {
+                info!(
+                    "Got {} route points from Garmin round-trip API",
+                    route_coords.len()
+                );
+                Self::coords_to_geo_points(&route_coords, distance_m)
+            }
+            Err(e) => {
+                info!(
+                    "Garmin round-trip API failed ({}), falling back to circular route",
+                    e
+                );
+                Self::generate_circular_route(lat, lng, distance_m)
+            }
+        };
+
+        let num_points = geo_points.len();
+
+        // Compute bounding box
+        let mut min_lat = f64::MAX;
+        let mut max_lat = f64::MIN;
+        let mut min_lng = f64::MAX;
+        let mut max_lng = f64::MIN;
+        for pt in &geo_points {
+            let plat = pt["latitude"].as_f64().unwrap_or(lat);
+            let plng = pt["longitude"].as_f64().unwrap_or(lng);
+            if plat < min_lat {
+                min_lat = plat;
+            }
+            if plat > max_lat {
+                max_lat = plat;
+            }
+            if plng < min_lng {
+                min_lng = plng;
+            }
+            if plng > max_lng {
+                max_lng = plng;
+            }
+        }
+
+        let payload = serde_json::json!({
+            "courseName": name,
+            "activityTypePk": 1,
+            "coordinateSystem": "WGS84",
+            "sourceTypeId": 3,
+            "rulePK": 2,
+            "distanceMeter": distance_m,
+            "elevationGainMeter": 0,
+            "elevationLossMeter": 0,
+            "openStreetMap": false,
+            "hasTurnDetectionDisabled": false,
+            "coursePoints": [],
+            "geoPoints": geo_points,
+            "courseLines": [{
+                "distanceInMeters": distance_m,
+                "sortOrder": 1,
+                "numberOfPoints": num_points,
+                "bearing": 0,
+                "coordinateSystem": "WGS84",
+                "points": null,
+                "courseId": null
+            }],
+            "boundingBox": {
+                "lowerLeft": { "lat": min_lat, "lng": min_lng },
+                "upperRight": { "lat": max_lat, "lng": max_lng }
+            },
+            "startPoint": {
+                "latitude": lat,
+                "longitude": lng
+            }
+        });
+
+        info!(
+            "Creating course '{}' ({:.1} km, {} points) at ({:.5}, {:.5})",
+            name,
+            distance_m / 1000.0,
+            num_points,
+            lat,
+            lng
+        );
+
+        self.api.create_course(&payload).await
+    }
+
+    /// Converts (lat, lng) coordinate pairs into Garmin geoPoint objects
+    /// with cumulative distance.
+    fn coords_to_geo_points(
+        coords: &[(f64, f64)],
+        total_distance_m: f64,
+    ) -> Vec<serde_json::Value> {
+        if coords.is_empty() {
+            return Vec::new();
+        }
+
+        // Compute cumulative haversine distances between consecutive points
+        let mut cumulative_distances = vec![0.0_f64];
+        for i in 1..coords.len() {
+            let d = haversine_distance(coords[i - 1].0, coords[i - 1].1, coords[i].0, coords[i].1);
+            cumulative_distances.push(cumulative_distances[i - 1] + d);
+        }
+        let raw_total = *cumulative_distances.last().unwrap_or(&1.0);
+
+        coords
+            .iter()
+            .enumerate()
+            .map(|(i, (lat, lng))| {
+                // Scale cumulative distance to match the requested total distance
+                let dist = if raw_total > 0.0 {
+                    cumulative_distances[i] / raw_total * total_distance_m
+                } else {
+                    0.0
+                };
+                serde_json::json!({
+                    "latitude": lat,
+                    "longitude": lng,
+                    "distance": dist,
+                    "elevation": 0.0,
+                    "timestamp": null
+                })
+            })
+            .collect()
+    }
+
+    /// Generates GPS points forming a circular loop of the given distance.
+    /// Used as fallback when Garmin's round-trip route API is unavailable.
+    fn generate_circular_route(lat: f64, lng: f64, distance_m: f64) -> Vec<serde_json::Value> {
+        let num_points = 72; // every 5 degrees
+        let radius_m = distance_m / (2.0 * std::f64::consts::PI);
+
+        // Convert radius to approximate lat/lng deltas
+        let lat_per_meter = 1.0 / 111_320.0;
+        let lng_per_meter = 1.0 / (111_320.0 * lat.to_radians().cos());
+
+        let mut points = Vec::with_capacity(num_points + 1);
+        let circumference = distance_m;
+
+        for i in 0..=num_points {
+            let angle = (i as f64 / num_points as f64) * 2.0 * std::f64::consts::PI;
+            let point_lat = lat + radius_m * angle.sin() * lat_per_meter;
+            let point_lng = lng + radius_m * angle.cos() * lng_per_meter;
+            let cumulative_distance = (i as f64 / num_points as f64) * circumference;
+
+            points.push(serde_json::json!({
+                "latitude": point_lat,
+                "longitude": point_lng,
+                "distance": cumulative_distance,
+                "elevation": 0.0,
+                "timestamp": null
+            }));
+        }
+
+        points
+    }
+
+    /// Finds the start GPS coordinates from the most recent running activity.
+    pub async fn get_last_run_start_location(&self) -> Option<(f64, f64)> {
+        let activities = match self.api.get_activities(0, 50).await {
+            Ok(acts) => acts,
+            Err(_) => return None,
+        };
+
+        for act in &activities {
+            let is_running = act
+                .get_activity_type()
+                .map(|t| {
+                    let lower = t.to_lowercase();
+                    lower.contains("run") || lower.contains("trail")
+                })
+                .unwrap_or(false);
+
+            if !is_running {
+                continue;
+            }
+
+            let start_lat = act
+                .raw_fields
+                .get("startLatitude")
+                .and_then(|v| v.as_f64());
+            let start_lng = act
+                .raw_fields
+                .get("startLongitude")
+                .and_then(|v| v.as_f64());
+
+            if let (Some(lat), Some(lng)) = (start_lat, start_lng) {
+                if lat.abs() > 0.001 && lng.abs() > 0.001 {
+                    return Some((lat, lng));
+                }
+            }
+        }
+
+        None
     }
 
     /// Validates scheduled FJ-AI strength workouts against `generated_workouts.json`.

@@ -1,23 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import AnimationProvider from "./AnimationProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#f87171",
+  themeColor: "#ff6b6b",
 };
 
 export const metadata: Metadata = {
@@ -42,13 +38,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} antialiased`}
+        style={{ fontFamily: "var(--font-inter), var(--font-sans)" }}
       >
-        {/* Ambient background glow orbs */}
+        {/* Subtle ambient background */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
-          <div className="ambient-glow-lg bg-red-500" style={{ top: '-10%', right: '-5%' }} />
-          <div className="ambient-glow-lg bg-indigo-500" style={{ bottom: '-10%', left: '-5%' }} />
-          <div className="ambient-glow bg-purple-500" style={{ top: '40%', left: '20%', width: '200px', height: '200px' }} />
+          <div className="ambient-glow-lg bg-red-500" style={{ top: '-8%', right: '-3%' }} />
+          <div className="ambient-glow-lg bg-indigo-500" style={{ bottom: '-8%', left: '-3%' }} />
         </div>
 
         <AnimationProvider>

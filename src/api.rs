@@ -59,6 +59,13 @@ pub struct AnalyzeUpcomingInput {
     pub workout: crate::models::ScheduledWorkout,
 }
 
+#[derive(Deserialize)]
+pub struct CreateCourseInput {
+    pub workout: crate::models::ScheduledWorkout,
+    pub start_latitude: Option<f64>,
+    pub start_longitude: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProfileConfigPayload {
@@ -396,6 +403,7 @@ pub async fn run_server(
         .route("/api/recovery/history", get(get_recovery_history))
         .route("/api/workouts/today", get(get_today_workouts))
         .route("/api/workouts/upcoming", get(get_upcoming_workouts))
+        .route("/api/activities/week", get(get_week_activities))
         .route("/api/force-pull", axum::routing::post(force_pull_data))
         .route("/api/generate", axum::routing::post(trigger_generate))
         .route(
@@ -406,6 +414,10 @@ pub async fn run_server(
         .route(
             "/api/analyze/upcoming",
             axum::routing::post(analyze_upcoming_event),
+        )
+        .route(
+            "/api/course/create",
+            axum::routing::post(create_course),
         )
         .route("/api/muscle_heatmap", get(get_muscle_heatmap))
         .route("/api/chat", get(get_chat).post(post_chat))
@@ -707,6 +719,27 @@ async fn get_upcoming_workouts(
 
     planned.sort_by(|a, b| a.date.cmp(&b.date));
     Json(planned)
+}
+
+async fn get_week_activities(
+    State(state): State<ApiState>,
+) -> Json<Vec<crate::models::GarminActivity>> {
+    let today = chrono::Local::now().date_naive();
+    let week_ago = (today - chrono::Duration::days(7))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    if let Ok(data) = state.garmin_client.fetch_data().await {
+        let mut activities: Vec<_> = data
+            .activities
+            .into_iter()
+            .filter(|a| a.start_time >= week_ago)
+            .collect();
+        activities.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+        return Json(activities);
+    }
+
+    Json(Vec::new())
 }
 
 async fn get_profiles() -> Result<Json<ProfilesPayload>, (StatusCode, Json<serde_json::Value>)> {
@@ -1062,4 +1095,143 @@ Here is the athlete's current state of preparation context:
             })),
         )),
     }
+}
+
+async fn create_course(
+    State(state): State<ApiState>,
+    Json(input): Json<CreateCourseInput>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if !state.generate_limiter.lock().await.allow() {
+        return Err(error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit exceeded for /api/course/create",
+        ));
+    }
+
+    let workout = &input.workout;
+
+    // Resolve distance
+    let distance_m = resolve_course_distance(&state, workout).await.map_err(|e| {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("Could not determine distance: {}", e),
+        )
+    })?;
+
+    // Resolve start coordinates
+    let (lat, lng) = resolve_course_coordinates(&state, &input).await.map_err(|e| {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("Could not determine start coordinates: {}", e),
+        )
+    })?;
+
+    let course_name = format!(
+        "FJ-AI: {} {:.1}km Loop",
+        workout.title.as_deref().unwrap_or("Run"),
+        distance_m / 1000.0
+    );
+
+    match state
+        .garmin_client
+        .create_course_for_workout(&course_name, distance_m, lat, lng)
+        .await
+    {
+        Ok(result) => {
+            let course_id = result.get("courseId").and_then(|v| v.as_i64());
+            Ok(Json(serde_json::json!({
+                "status": "success",
+                "courseName": course_name,
+                "courseId": course_id,
+                "distanceKm": distance_m / 1000.0
+            })))
+        }
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("Failed to create course: {}", e),
+        )),
+    }
+}
+
+async fn resolve_course_distance(
+    state: &ApiState,
+    workout: &crate::models::ScheduledWorkout,
+) -> Result<f64, String> {
+    // 1. Explicit distance on workout
+    if let Some(d) = workout.distance {
+        if d > 0.0 {
+            return Ok(d);
+        }
+    }
+
+    // 2. Adaptive details estimated distance
+    if let Some(ref details) = workout.adaptive_details {
+        if let Some(d) = details
+            .get("estimatedDistanceInMeters")
+            .and_then(|v| v.as_f64())
+        {
+            if d > 0.0 {
+                return Ok(d);
+            }
+        }
+    }
+
+    // 3. AI estimation via Gemini
+    let gemini_key = &state.config.gemini_api_key;
+    if gemini_key.is_empty() {
+        return Err("No distance available and GEMINI_API_KEY not configured".to_string());
+    }
+
+    let gemini_model =
+        std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-flash-preview".to_string());
+    let ai_client = crate::ai_client::AiClient::new(gemini_key.clone(), gemini_model);
+
+    let workout_json = serde_json::to_string(workout).unwrap_or_default();
+    let prompt = format!(
+        "Estimate the distance in meters for this run workout. Return ONLY a plain integer representing meters, nothing else.\n\n{}",
+        workout_json
+    );
+
+    match ai_client.generate_workout(&prompt).await {
+        Ok(text) => {
+            let parsed = text.trim().parse::<f64>().map_err(|_| {
+                format!("AI returned non-numeric distance: {}", text.trim())
+            })?;
+            if parsed > 0.0 {
+                Ok(parsed)
+            } else {
+                Err("AI estimated zero or negative distance".to_string())
+            }
+        }
+        Err(e) => Err(format!("AI estimation failed: {}", e)),
+    }
+}
+
+async fn resolve_course_coordinates(
+    state: &ApiState,
+    input: &CreateCourseInput,
+) -> Result<(f64, f64), String> {
+    // 1. Explicit from request body
+    if let (Some(lat), Some(lng)) = (input.start_latitude, input.start_longitude) {
+        if lat.abs() > 0.001 && lng.abs() > 0.001 {
+            return Ok((lat, lng));
+        }
+    }
+
+    // 2. Config defaults
+    if let (Some(lat), Some(lng)) = (
+        state.config.default_start_latitude,
+        state.config.default_start_longitude,
+    ) {
+        if lat.abs() > 0.001 && lng.abs() > 0.001 {
+            return Ok((lat, lng));
+        }
+    }
+
+    // 3. Last GPS running activity
+    if let Some((lat, lng)) = state.garmin_client.get_last_run_start_location().await {
+        return Ok((lat, lng));
+    }
+
+    Err("No start coordinates available. Provide start_latitude/start_longitude, configure default_start_latitude/longitude, or complete a GPS run activity.".to_string())
 }

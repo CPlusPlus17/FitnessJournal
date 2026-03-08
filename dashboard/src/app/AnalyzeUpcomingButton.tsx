@@ -21,14 +21,7 @@ export default function AnalyzeUpcomingButton({ workout }: { workout: PlannedWor
     const [analysis, setAnalysis] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    const handleAnalyze = async (e: React.MouseEvent) => {
-        e.stopPropagation();
-
-        if (analysis) {
-            setAnalysis(null);
-            return;
-        }
-
+    const runAnalysis = async () => {
         setLoading(true);
         setError(null);
         try {
@@ -39,7 +32,7 @@ export default function AnalyzeUpcomingButton({ workout }: { workout: PlannedWor
             });
             const data = await res.json();
             if (!res.ok) {
-                setError(data.message || 'Failed to analyze primary event');
+                setError(data.message || 'Failed to analyze');
             } else {
                 setAnalysis(data.analysis);
             }
@@ -49,36 +42,67 @@ export default function AnalyzeUpcomingButton({ workout }: { workout: PlannedWor
         setLoading(false);
     };
 
+    const handleAnalyze = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (analysis) {
+            setAnalysis(null);
+            return;
+        }
+        await runAnalysis();
+    };
+
+    const handleReanalyze = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        await runAnalysis();
+    };
+
     return (
-        <div className="mt-4 pt-4 border-t border-white/8 relative z-10 w-full">
+        <>
             <button
                 onClick={handleAnalyze}
                 disabled={loading}
-                className="w-full text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-medium py-2.5 rounded-xl transition-all border border-amber-500/15 hover:border-amber-500/30 disabled:opacity-40 flex justify-center items-center gap-2 hover:shadow-[0_0_16px_rgba(245,158,11,0.1)]"
+                title={error || undefined}
+                className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full transition-all whitespace-nowrap bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/35 disabled:opacity-50"
             >
                 {loading ? (
                     <>
-                        <span className="w-3 h-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin flex-shrink-0"></span>
-                        Analyzing Event...
+                        <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-amber-400 border-t-transparent animate-spin flex-shrink-0"></span>
+                        Analyzing...
                     </>
                 ) : analysis ? (
-                    'Hide Analysis'
+                    'Hide'
                 ) : (
-                    '⭐ Analyze Event Preparation'
+                    '✦ Analyze'
                 )}
             </button>
 
             {error && (
-                <div className="mt-3 text-xs text-red-400 bg-red-400/8 p-3 rounded-xl border border-red-500/15">
+                <div className="mt-2 text-xs text-red-400 bg-red-400/8 p-2 rounded-lg border border-red-500/15 col-span-full">
                     {error}
                 </div>
             )}
 
             {analysis && (
-                <div className="mt-4 text-sm text-gray-300 bg-black/20 p-4 rounded-xl border border-amber-500/15 prose prose-invert prose-amber prose-sm max-w-none overflow-auto max-h-96 custom-scrollbar text-left backdrop-blur-sm" style={{ animation: 'fadeSlideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)' }}>
+                <div className="mt-2 text-sm text-gray-300 bg-black/20 p-4 rounded-xl border border-amber-500/15 prose prose-invert prose-amber prose-sm max-w-none overflow-auto max-h-96 custom-scrollbar text-left backdrop-blur-sm col-span-full" style={{ animation: 'fadeSlideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)' }}>
                     <ReactMarkdown>{analysis}</ReactMarkdown>
+                    <div className="mt-3 pt-2 border-t border-amber-500/10 not-prose flex justify-end">
+                        <button
+                            onClick={handleReanalyze}
+                            disabled={loading}
+                            className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full transition-all whitespace-nowrap bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/35 disabled:opacity-50"
+                        >
+                            {loading ? (
+                                <>
+                                    <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-amber-400 border-t-transparent animate-spin flex-shrink-0"></span>
+                                    Analyzing...
+                                </>
+                            ) : (
+                                '↻ Re-analyze'
+                            )}
+                        </button>
+                    </div>
                 </div>
             )}
-        </div>
+        </>
     );
 }

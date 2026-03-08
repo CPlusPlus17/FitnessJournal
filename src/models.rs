@@ -88,6 +88,14 @@ pub struct ScheduledWorkout {
     pub duration: Option<f64>,
     pub distance: Option<f64>,
     pub description: Option<String>,
+
+    pub adaptive_details: Option<serde_json::Value>,
+
+    #[serde(default)]
+    pub workout_detail: Option<serde_json::Value>,
+
+    #[serde(flatten)]
+    pub raw_fields: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

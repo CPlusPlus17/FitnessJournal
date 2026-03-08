@@ -418,6 +418,11 @@ impl GarminApi {
             .await
     }
 
+    pub async fn get_adaptive_workout_details(&self, uuid: &str) -> std::result::Result<serde_json::Value, anyhow::Error> {
+        let endpoint = format!("/workout-service/fbt-adaptive/{}", uuid);
+        self.connectapi_get(&endpoint).await
+    }
+
     pub async fn get_sleep_data(
         &self,
         display_name: &str,
@@ -455,6 +460,54 @@ impl GarminApi {
     ) -> std::result::Result<serde_json::Value, anyhow::Error> {
         let endpoint = format!("/hrv-service/hrv/{}", date_iso);
         self.connectapi_get(&endpoint).await
+    }
+
+    pub async fn create_course(&self, payload: &serde_json::Value) -> Result<serde_json::Value> {
+        self.connectapi_post("/course-service/course", payload)
+            .await
+    }
+
+    /// Fetches round-trip route points from Garmin's route generation API.
+    /// Returns a Vec of (latitude, longitude) pairs forming a loop.
+    pub async fn get_round_trip_route(
+        &self,
+        lat: f64,
+        lng: f64,
+        distance_m: f64,
+    ) -> Result<Vec<(f64, f64)>> {
+        let endpoint = format!(
+            "/course-service/course/roundTripRoutes?startLat={}&startLon={}&direction=north&distance={}&courseType=RUNNING",
+            lat, lng, distance_m as i64
+        );
+        let val = self.connectapi_get(&endpoint).await?;
+
+        // Response is an array of route alternatives, each is an array of [lat, lon] pairs
+        let routes = val
+            .as_array()
+            .ok_or_else(|| anyhow!("Round trip route response is not an array"))?;
+
+        let first_route = routes
+            .first()
+            .and_then(|r| r.as_array())
+            .ok_or_else(|| anyhow!("No route alternatives returned"))?;
+
+        let mut points = Vec::with_capacity(first_route.len());
+        for point in first_route {
+            let coords = point
+                .as_array()
+                .ok_or_else(|| anyhow!("Route point is not an array"))?;
+            if coords.len() >= 2 {
+                let lat = coords[0].as_f64().ok_or_else(|| anyhow!("Invalid latitude"))?;
+                let lng = coords[1].as_f64().ok_or_else(|| anyhow!("Invalid longitude"))?;
+                points.push((lat, lng));
+            }
+        }
+
+        if points.is_empty() {
+            return Err(anyhow!("Round trip route returned no points"));
+        }
+
+        Ok(points)
     }
 
     pub async fn get_rhr_trend(
