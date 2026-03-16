@@ -766,24 +766,57 @@ pub fn start_weekly_review_notifier(
                             .filter(|a| a.start_time >= seven_days_ago_str)
                             .collect();
 
-                        // Calculate basic Volume
-                        let total_duration_mins: f64 = recent_activities
-                            .iter()
-                            .filter_map(|a| a.duration)
-                            .sum::<f64>()
-                            / 60.0;
-                        let total_distance_km: f64 = recent_activities
-                            .iter()
-                            .filter_map(|a| a.distance)
-                            .sum::<f64>()
-                            / 1000.0;
+                        // Calculate volume broken down by activity type
                         let act_count = recent_activities.len();
+                        info!("Weekly summary: {} activities in range since {}", act_count, seven_days_ago_str);
+                        let mut type_stats: std::collections::HashMap<String, (f64, f64, usize)> =
+                            std::collections::HashMap::new();
+                        for a in &recent_activities {
+                            let atype = a
+                                .get_activity_type()
+                                .unwrap_or("other")
+                                .replace('_', " ");
+                            let dist_m = a.distance.unwrap_or(0.0);
+                            let dur_s = a.duration.unwrap_or(0.0);
+                            info!(
+                                "  Activity: name={:?} type={} date={} distance={:.0}m ({:.2}km) duration={:.0}s ({:.1}min)",
+                                a.name.as_deref().unwrap_or("?"),
+                                atype,
+                                &a.start_time,
+                                dist_m,
+                                dist_m / 1000.0,
+                                dur_s,
+                                dur_s / 60.0
+                            );
+                            let entry = type_stats.entry(atype).or_insert((0.0, 0.0, 0));
+                            entry.0 += dist_m / 1000.0; // km
+                            entry.1 += dur_s / 60.0; // mins
+                            entry.2 += 1;
+                        }
+                        for (atype, (dist, dur, count)) in &type_stats {
+                            info!("  Type totals: {} (×{}): {:.1} km, {:.0} mins", atype, count, dist, dur);
+                        }
+                        let total_distance_km: f64 =
+                            type_stats.values().map(|(d, _, _)| d).sum();
+                        let total_duration_mins: f64 =
+                            type_stats.values().map(|(_, t, _)| t).sum();
 
                         // Build Prompt Context
                         let mut context = format!(
                             "Athlete's Weekly Summary\nTimeframe: {} to {}\nWorkouts Completed: {}\nTotal Duration: {:.1} mins\nTotal Distance: {:.1} km\n",
                             seven_days_ago_str, today_str, act_count, total_duration_mins, total_distance_km
                         );
+
+                        // Add per-type breakdown
+                        context.push_str("\nBreakdown by Activity Type:\n");
+                        let mut sorted_types: Vec<_> = type_stats.iter().collect();
+                        sorted_types.sort_by(|a, b| b.1 .1.partial_cmp(&a.1 .1).unwrap_or(std::cmp::Ordering::Equal));
+                        for (atype, (dist, dur, count)) in &sorted_types {
+                            context.push_str(&format!(
+                                "- {} (×{}): {:.1} km, {:.0} mins\n",
+                                atype, count, dist, dur
+                            ));
+                        }
 
                         if let Some(metrics) = &data.recovery_metrics {
                             let sleep = metrics
@@ -816,10 +849,26 @@ pub fn start_weekly_review_notifier(
                             }
                         }
 
+                        // Build the stats header that will be prepended to the message
+                        let mut stats_header = format!(
+                            "📊 Week: {} → {}\n🏋️ {} workouts | ⏱ {:.0} mins | 📏 {:.1} km\n",
+                            seven_days_ago_str, today_str, act_count, total_duration_mins, total_distance_km
+                        );
+                        for (atype, (dist, dur, count)) in &sorted_types {
+                            stats_header.push_str(&format!(
+                                "  • {} (×{}): {:.1} km, {:.0} min\n",
+                                atype, count, dist, dur
+                            ));
+                        }
+
                         let prompt = format!(
                             "You are the athlete's elite performance coach. Review the following weekly summary of their Garmin data.\n\
-                            Write a highly encouraging, crisp, 2-3 paragraph weekly review to be sent on Signal. \n\
-                            Acknowledge their work volume, comment critically but kindly on any recovery trends (sleep, body battery), and give them a focal point for the upcoming week based on tomorrow's schedule.\n\
+                            Write a highly encouraging, crisp, 2-3 paragraph weekly review to be sent on Signal.\n\
+                            IMPORTANT: The exact stats (distances, durations, counts) are already shown to the athlete above your text. \
+                            Do NOT restate, paraphrase, or round the numbers. Focus purely on qualitative coaching insights: \
+                            training patterns, consistency, recovery trends, and direction for the upcoming week.\n\
+                            Comment critically but kindly on any recovery data (sleep, body battery), and give them a focal point \
+                            for the upcoming week based on tomorrow's schedule.\n\
                             Keep the tone professional, motivating, and conversational.\n\n\
                             === WEEKLY DATA ===\n{}",
                             context
@@ -827,7 +876,7 @@ pub fn start_weekly_review_notifier(
 
                         match ai_client.generate_workout(&prompt).await {
                             Ok(review) => {
-                                let msg = format!("📈 **Weekly Coach Review**\n\n{}", review);
+                                let msg = format!("📈 **Weekly Coach Review**\n\n{}\n{}", stats_header, review);
                                 broadcast_message(&msg, &config).await;
                                 last_sent_week = current_week;
                             }

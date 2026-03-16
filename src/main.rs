@@ -43,6 +43,8 @@ struct Cli {
     delete_workouts: bool,
     #[arg(long, help = "Test force-refreshing OAuth2 Garmin tokens")]
     test_refresh: bool,
+    #[arg(long, help = "Debug: dump all activities from last 7 days with distances")]
+    debug_weekly: bool,
 }
 
 #[tokio::main]
@@ -222,6 +224,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match garmin_client_refresh.api.refresh_oauth2().await {
             Ok(_) => info!("Successfully refreshed token!"),
             Err(e) => info!("Failed to refresh: {}", e),
+        }
+        return Ok(());
+    }
+
+    if args.debug_weekly {
+        info!("=== DEBUG WEEKLY: Fetching Garmin data ===");
+        match garmin_client.fetch_data().await {
+            Ok(data) => {
+                let now = chrono::Local::now().naive_local();
+                let today_str = now.format("%Y-%m-%d").to_string();
+                let seven_days_ago = now - chrono::Duration::days(7);
+                let seven_days_ago_str = seven_days_ago.format("%Y-%m-%d").to_string();
+
+                info!("Date range: {} to {}", seven_days_ago_str, today_str);
+                info!("Total activities in Garmin response: {}", data.activities.len());
+
+                let recent: Vec<_> = data.activities.iter()
+                    .filter(|a| a.start_time >= seven_days_ago_str)
+                    .collect();
+
+                info!("Activities in last 7 days: {}", recent.len());
+                info!("---");
+
+                let mut type_stats: std::collections::HashMap<String, (f64, f64, usize)> =
+                    std::collections::HashMap::new();
+
+                for a in &recent {
+                    let atype = a.get_activity_type().unwrap_or("other").replace('_', " ");
+                    let dist_m = a.distance.unwrap_or(0.0);
+                    let dur_s = a.duration.unwrap_or(0.0);
+                    info!(
+                        "  [{:>20}] {:>50} | date={} | dist={:>8.0}m ({:>6.2}km) | dur={:>6.0}s ({:>5.1}min)",
+                        atype,
+                        a.name.as_deref().unwrap_or("?"),
+                        &a.start_time[..10.min(a.start_time.len())],
+                        dist_m, dist_m / 1000.0,
+                        dur_s, dur_s / 60.0
+                    );
+                    let entry = type_stats.entry(atype).or_insert((0.0, 0.0, 0));
+                    entry.0 += dist_m / 1000.0;
+                    entry.1 += dur_s / 60.0;
+                    entry.2 += 1;
+                }
+
+                info!("---");
+                info!("=== PER-TYPE TOTALS ===");
+                let mut sorted: Vec<_> = type_stats.iter().collect();
+                sorted.sort_by(|a, b| b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal));
+                let mut grand_dist = 0.0;
+                let mut grand_dur = 0.0;
+                for (atype, (dist, dur, count)) in &sorted {
+                    info!("  {} (×{}): {:.1} km, {:.0} mins", atype, count, dist, dur);
+                    grand_dist += dist;
+                    grand_dur += dur;
+                }
+                info!("---");
+                info!("GRAND TOTAL: {:.1} km, {:.0} mins across {} activities", grand_dist, grand_dur, recent.len());
+            }
+            Err(e) => error!("Failed to fetch Garmin data: {}", e),
         }
         return Ok(());
     }
