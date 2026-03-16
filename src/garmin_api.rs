@@ -508,6 +508,21 @@ impl GarminApi {
             return Err(anyhow!("Round trip route returned no points"));
         }
 
+        // Ensure the route closes back to the start point.
+        // If the last point is more than ~10 m from the first, append the first point.
+        if let (Some(first), Some(last)) = (points.first(), points.last()) {
+            let dlat = (first.0 - last.0).abs();
+            let dlng = (first.1 - last.1).abs();
+            // ~0.0001° ≈ 11 m
+            if dlat > 0.0001 || dlng > 0.0001 {
+                info!(
+                    "Round-trip route didn't close (gap: {:.5}°, {:.5}°), appending start point to close loop",
+                    dlat, dlng
+                );
+                points.push(*first);
+            }
+        }
+
         Ok(points)
     }
 
